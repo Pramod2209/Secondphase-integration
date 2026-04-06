@@ -1,0 +1,5 @@
+Jane Smith
+Senior Backend Engineer
+Skills: Python, SQL, FastAPI, Docker, Redis, Linux, Terraform, Kubernetes
+Experience: 6 years
+Education: Master of Science in Computer Science

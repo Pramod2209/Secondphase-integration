@@ -1,0 +1,1291 @@
+{
+  "a/b testing": [
+    "a/btesting",
+    "a/b-testing",
+    "testing b a"
+  ],
+  "accessibility": [
+    "accessibility tool"
+  ],
+  "active directory": [
+    "activedirectory",
+    "active-directory",
+    "directory active"
+  ],
+  "activemq": [
+    "activemq tool"
+  ],
+  "agentic ai": [
+    "agenticai",
+    "agentic-ai",
+    "ai agentic"
+  ],
+  "agile": [
+    "agile methodology",
+    "agile scrum",
+    "iterative agile",
+    "agile process"
+  ],
+  "airflow": [
+    "apache airflow",
+    "dag airflow",
+    "air flow",
+    "airflw"
+  ],
+  "alembic": [
+    "alembic tool"
+  ],
+  "amplitude": [
+    "amplitude tool"
+  ],
+  "android": [
+    "android tool"
+  ],
+  "angular": [
+    "angularjs",
+    "ng",
+    "angular 2+",
+    "typescript angular"
+  ],
+  "ansible": [
+    "ansible playbook",
+    "ansible automation",
+    "ansble",
+    "ansible tower"
+  ],
+  "ant": [
+    "ant tool"
+  ],
+  "apache http server": [
+    "apachehttpserver",
+    "apache-http-server",
+    "server http apache"
+  ],
+  "argocd": [
+    "argocd tool"
+  ],
+  "arm templates": [
+    "armtemplates",
+    "arm-templates",
+    "templates arm"
+  ],
+  "auth0": [
+    "auth0 tool"
+  ],
+  "aws": [
+    "amazon web services",
+    "aws cloud",
+    "ec2 aws",
+    "s3 aws"
+  ],
+  "azure": [
+    "microsoft azure",
+    "azure cloud",
+    "az",
+    "azure services"
+  ],
+  "azure devops": [
+    "azuredevops",
+    "azure-devops",
+    "devops azure"
+  ],
+  "azure functions": [
+    "azure function app",
+    "ms functions",
+    "function app",
+    "az functions"
+  ],
+  "babel": [
+    "babel tool"
+  ],
+  "backbone": [
+    "backbone tool"
+  ],
+  "bamboo": [
+    "bamboo tool"
+  ],
+  "bandit": [
+    "bandit tool"
+  ],
+  "bash": [
+    "shell scripting",
+    "bash script",
+    "gnu bash",
+    "sh bash"
+  ],
+  "bazel": [
+    "bazel tool"
+  ],
+  "beam": [
+    "beam tool"
+  ],
+  "bicep": [
+    "bicep tool"
+  ],
+  "bigquery": [
+    "google bigquery",
+    "bq",
+    "gcp bq",
+    "big query"
+  ],
+  "black": [
+    "black tool"
+  ],
+  "blockchain": [
+    "blockchain tool"
+  ],
+  "bootstrap": [
+    "bootstrap tool"
+  ],
+  "c#": [
+    "csharp",
+    ".net c#",
+    "dotnet c#",
+    "c sharp"
+  ],
+  "c++": [
+    "cpp",
+    "c plus plus",
+    "modern c++",
+    "cxx"
+  ],
+  "calico": [
+    "calico tool"
+  ],
+  "cassandra": [
+    "apache cassandra",
+    "cql",
+    "cassandra db",
+    "cass"
+  ],
+  "catboost": [
+    "catboost tool"
+  ],
+  "celery": [
+    "celery tool"
+  ],
+  "chai": [
+    "chai tool"
+  ],
+  "chakra ui": [
+    "chakraui",
+    "chakra-ui",
+    "ui chakra"
+  ],
+  "chaos engineering": [
+    "chaosengineering",
+    "chaos-engineering",
+    "engineering chaos"
+  ],
+  "chef": [
+    "chef tool"
+  ],
+  "ci/cd": [
+    "continuous integration",
+    "continuous deployment",
+    "cicd",
+    "ci cd pipeline"
+  ],
+  "cilium": [
+    "cilium tool"
+  ],
+  "circleci": [
+    "circleci tool"
+  ],
+  "clickhouse": [
+    "clickhouse tool"
+  ],
+  "cloud run": [
+    "gcp cloud run",
+    "google cloud run",
+    "serverless run",
+    "cloudrun"
+  ],
+  "cloudformation": [
+    "cloudformation tool"
+  ],
+  "cmake": [
+    "cmake tool"
+  ],
+  "coap": [
+    "coap tool"
+  ],
+  "conda": [
+    "conda tool"
+  ],
+  "confluence": [
+    "atlassian confluence",
+    "wiki confluence",
+    "conf luence",
+    "confluance"
+  ],
+  "consul": [
+    "consul tool"
+  ],
+  "cosmos db": [
+    "cosmosdb",
+    "cosmos-db",
+    "db cosmos"
+  ],
+  "couchbase": [
+    "couchbase tool"
+  ],
+  "couchdb": [
+    "couchdb tool"
+  ],
+  "crm": [
+    "crm tool"
+  ],
+  "cypress": [
+    "cypress tool"
+  ],
+  "dask": [
+    "dask tool"
+  ],
+  "databricks": [
+    "azure databricks",
+    "dbx",
+    "databrick",
+    "spark databricks"
+  ],
+  "datadog": [
+    "datadog tool"
+  ],
+  "dbt": [
+    "data build tool",
+    "dbt core",
+    "dbt cloud",
+    "dbt models"
+  ],
+  "deno": [
+    "deno tool"
+  ],
+  "django": [
+    "django framework",
+    "dj",
+    "python django",
+    "djangorest"
+  ],
+  "dns": [
+    "dns tool"
+  ],
+  "docker": [
+    "dockerfile",
+    "docker compose",
+    "containerization",
+    "dockers"
+  ],
+  "drupal": [
+    "drupal tool"
+  ],
+  "dynamics 365": [
+    "dynamics365",
+    "dynamics-365",
+    "365 dynamics"
+  ],
+  "dynamodb": [
+    "dynamo db",
+    "aws dynamodb",
+    "dynamo",
+    "ddb"
+  ],
+  "ec2": [
+    "aws ec2",
+    "elastic compute cloud",
+    "ec2 instance",
+    "amazon ec2"
+  ],
+  "elasticsearch": [
+    "elastic",
+    "es",
+    "elk search",
+    "elastic search"
+  ],
+  "electron": [
+    "electron tool"
+  ],
+  "elk stack": [
+    "elkstack",
+    "elk-stack",
+    "stack elk"
+  ],
+  "embedded systems": [
+    "embeddedsystems",
+    "embedded-systems",
+    "systems embedded"
+  ],
+  "ember": [
+    "ember tool"
+  ],
+  "erp": [
+    "erp tool"
+  ],
+  "eslint": [
+    "eslint tool"
+  ],
+  "ethereum": [
+    "ethereum tool"
+  ],
+  "etl": [
+    "elt",
+    "data pipeline",
+    "extract transform load",
+    "etl pipelines"
+  ],
+  "event hubs": [
+    "eventhubs",
+    "event-hubs",
+    "hubs event"
+  ],
+  "express": [
+    "expressjs",
+    "express.js",
+    "node express",
+    "expres"
+  ],
+  "faiss": [
+    "faiss tool"
+  ],
+  "falco": [
+    "falco tool"
+  ],
+  "fastapi": [
+    "fast api",
+    "python fastapi",
+    "uvicorn api",
+    "fasapi"
+  ],
+  "feature flags": [
+    "featureflags",
+    "feature-flags",
+    "flags feature"
+  ],
+  "figma": [
+    "figma design",
+    "ui figma",
+    "fig ma",
+    "figma prototyping"
+  ],
+  "firestore": [
+    "firestore tool"
+  ],
+  "firmware": [
+    "firmware tool"
+  ],
+  "fish shell": [
+    "fishshell",
+    "fish-shell",
+    "shell fish"
+  ],
+  "flask": [
+    "python flask",
+    "flsk",
+    "wsgi flask",
+    "flaskapp"
+  ],
+  "flink": [
+    "flink tool"
+  ],
+  "flutter": [
+    "flutter tool"
+  ],
+  "fluxcd": [
+    "fluxcd tool"
+  ],
+  "flyway": [
+    "flyway tool"
+  ],
+  "gcp": [
+    "google cloud",
+    "gcloud",
+    "google cloud platform",
+    "gcp cloud"
+  ],
+  "git": [
+    "git scm",
+    "version control git",
+    "gitflow",
+    "git cli"
+  ],
+  "github actions": [
+    "gh actions",
+    "github workflows",
+    "actions ci",
+    "gha"
+  ],
+  "gitlab ci": [
+    "gitlab pipeline",
+    "gitlab runner",
+    "gitlab-ci",
+    "glci"
+  ],
+  "go": [
+    "golang",
+    "go lang",
+    "go1",
+    "go language"
+  ],
+  "gpg": [
+    "gpg tool"
+  ],
+  "gradle": [
+    "gradle tool"
+  ],
+  "grafana": [
+    "grafana dashboards",
+    "graf",
+    "grafana monitoring",
+    "grafna"
+  ],
+  "graphql": [
+    "graph ql",
+    "apollo graphql",
+    "gql",
+    "graph ql api"
+  ],
+  "grpc": [
+    "g rpc",
+    "grpc api",
+    "protobuf rpc",
+    "grpc service"
+  ],
+  "grpc-web": [
+    "grpc-web tool"
+  ],
+  "gunicorn": [
+    "gunicorn tool"
+  ],
+  "hadoop": [
+    "hadoop tool"
+  ],
+  "hbase": [
+    "hbase tool"
+  ],
+  "helm": [
+    "helm chart",
+    "k8s helm",
+    "helm3",
+    "helms"
+  ],
+  "hibernate": [
+    "hibernate tool"
+  ],
+  "hive": [
+    "hive tool"
+  ],
+  "http": [
+    "http tool"
+  ],
+  "https": [
+    "https tool"
+  ],
+  "huggingface": [
+    "hugging face",
+    "transformers",
+    "hf",
+    "hf hub"
+  ],
+  "hyperledger": [
+    "hyperledger tool"
+  ],
+  "iis": [
+    "iis tool"
+  ],
+  "incident management": [
+    "incidentmanagement",
+    "incident-management",
+    "management incident"
+  ],
+  "influxdb": [
+    "influxdb tool"
+  ],
+  "ios": [
+    "ios tool"
+  ],
+  "iot": [
+    "iot tool"
+  ],
+  "ipfs": [
+    "ipfs tool"
+  ],
+  "isort": [
+    "isort tool"
+  ],
+  "istio": [
+    "istio tool"
+  ],
+  "jaeger": [
+    "jaeger tool"
+  ],
+  "java": [
+    "jdk",
+    "java8",
+    "java 11",
+    "java 17"
+  ],
+  "javascript": [
+    "js",
+    "ecmascript",
+    "node javascript",
+    "java script"
+  ],
+  "jenkins": [
+    "jenkins ci",
+    "jenkins pipeline",
+    "jenkinsfile",
+    "jenkin"
+  ],
+  "jest": [
+    "jest tool"
+  ],
+  "jetpack compose": [
+    "jetpackcompose",
+    "jetpack-compose",
+    "compose jetpack"
+  ],
+  "jira": [
+    "atlassian jira",
+    "jir a",
+    "jira tickets",
+    "jra"
+  ],
+  "joomla": [
+    "joomla tool"
+  ],
+  "jpa": [
+    "jpa tool"
+  ],
+  "jquery": [
+    "jquery tool"
+  ],
+  "jwt": [
+    "jwt tool"
+  ],
+  "kafka": [
+    "apache kafka",
+    "kafka streams",
+    "confluent",
+    "kafk"
+  ],
+  "keycloak": [
+    "keycloak tool"
+  ],
+  "kinesis": [
+    "kinesis tool"
+  ],
+  "kms": [
+    "kms tool"
+  ],
+  "kotlin": [
+    "kotlinlang",
+    "kt",
+    "android kotlin",
+    "kotlin jvm"
+  ],
+  "kubeflow": [
+    "kubeflow tool"
+  ],
+  "kubernetes": [
+    "k8s",
+    "kube",
+    "kubectl",
+    "kubernets"
+  ],
+  "kudu": [
+    "kudu tool"
+  ],
+  "kustomize": [
+    "kustomize tool"
+  ],
+  "kyverno": [
+    "kyverno tool"
+  ],
+  "lambda": [
+    "aws lambda",
+    "serverless lambda",
+    "lambda function",
+    "amazon lambda"
+  ],
+  "langchain": [
+    "lang chain",
+    "lc",
+    "langchain framework",
+    "lang-chain"
+  ],
+  "laravel": [
+    "laravel php",
+    "artisan",
+    "eloquent",
+    "larvel"
+  ],
+  "launchdarkly": [
+    "launchdarkly tool"
+  ],
+  "ldap": [
+    "ldap tool"
+  ],
+  "lightgbm": [
+    "lightgbm tool"
+  ],
+  "linkerd": [
+    "linkerd tool"
+  ],
+  "linux": [
+    "unix linux",
+    "ubuntu",
+    "centos",
+    "linux os"
+  ],
+  "liquibase": [
+    "liquibase tool"
+  ],
+  "llmops": [
+    "llmops tool"
+  ],
+  "loki": [
+    "loki tool"
+  ],
+  "magento": [
+    "magento tool"
+  ],
+  "make": [
+    "make tool"
+  ],
+  "material ui": [
+    "materialui",
+    "material-ui",
+    "ui material"
+  ],
+  "maven": [
+    "maven tool"
+  ],
+  "mcp": [
+    "mcp tool"
+  ],
+  "memcached": [
+    "memcached tool"
+  ],
+  "microservices": [
+    "micro services",
+    "distributed services",
+    "service mesh",
+    "microservice architecture"
+  ],
+  "milvus": [
+    "milvus tool"
+  ],
+  "mixpanel": [
+    "mixpanel tool"
+  ],
+  "mlflow": [
+    "mlflow tool"
+  ],
+  "mobx": [
+    "mobx tool"
+  ],
+  "mocha": [
+    "mocha tool"
+  ],
+  "mongodb": [
+    "mongo",
+    "mongo db",
+    "nosql mongodb",
+    "mongod"
+  ],
+  "mqtt": [
+    "mqtt tool"
+  ],
+  "mybatis": [
+    "mybatis tool"
+  ],
+  "mypy": [
+    "mypy tool"
+  ],
+  "mysql": [
+    "my sql",
+    "mariadb",
+    "mysql db",
+    "mysql8"
+  ],
+  "nats": [
+    "nats tool"
+  ],
+  "neo4j": [
+    "graph db",
+    "cypher",
+    "neo4j graph",
+    "neo"
+  ],
+  "nestjs": [
+    "nest.js",
+    "nest js",
+    "node nest",
+    "nestjs framework"
+  ],
+  "new relic": [
+    "newrelic",
+    "new-relic",
+    "relic new"
+  ],
+  "nextjs": [
+    "next.js",
+    "next js",
+    "next framework",
+    "nextjs app"
+  ],
+  "nginx": [
+    "nginx tool"
+  ],
+  "nodejs": [
+    "nodejs tool"
+  ],
+  "nox": [
+    "nox tool"
+  ],
+  "npm": [
+    "npm tool"
+  ],
+  "numpy": [
+    "np",
+    "num py",
+    "scientific python",
+    "numpi"
+  ],
+  "nuxtjs": [
+    "nuxtjs tool"
+  ],
+  "oauth2": [
+    "oauth2 tool"
+  ],
+  "okta": [
+    "okta tool"
+  ],
+  "opa": [
+    "opa tool"
+  ],
+  "openai api": [
+    "openai",
+    "gpt api",
+    "chatgpt api",
+    "open ai api"
+  ],
+  "openapi": [
+    "openapi tool"
+  ],
+  "opencv": [
+    "opencv tool"
+  ],
+  "openid connect": [
+    "openidconnect",
+    "openid-connect",
+    "connect openid"
+  ],
+  "opensearch": [
+    "opensearch tool"
+  ],
+  "opentelemetry": [
+    "opentelemetry tool"
+  ],
+  "oracle": [
+    "oracle db",
+    "oracle sql",
+    "plsql oracle",
+    "orcl"
+  ],
+  "owasp": [
+    "owasp tool"
+  ],
+  "pandas": [
+    "pd",
+    "dataframe pandas",
+    "python pandas",
+    "panda"
+  ],
+  "php": [
+    "php8",
+    "php 7",
+    "laravel php",
+    "hypertext preprocessor"
+  ],
+  "pinecone": [
+    "pinecone tool"
+  ],
+  "pipenv": [
+    "pipenv tool"
+  ],
+  "playwright": [
+    "playwright tool"
+  ],
+  "pnpm": [
+    "pnpm tool"
+  ],
+  "poetry": [
+    "poetry tool"
+  ],
+  "postgresql": [
+    "postgres",
+    "psql",
+    "pg",
+    "postgre"
+  ],
+  "postman": [
+    "api testing postman",
+    "post man",
+    "postman collection",
+    "pstman"
+  ],
+  "power bi": [
+    "powerbi",
+    "microsoft power bi",
+    "pbi",
+    "power-bi"
+  ],
+  "powershell": [
+    "powershell tool"
+  ],
+  "presto": [
+    "presto tool"
+  ],
+  "prettier": [
+    "prettier tool"
+  ],
+  "prisma": [
+    "prisma tool"
+  ],
+  "product analytics": [
+    "productanalytics",
+    "product-analytics",
+    "analytics product"
+  ],
+  "prometheus": [
+    "prom metrics",
+    "prometheus monitoring",
+    "prom",
+    "promtheus"
+  ],
+  "prompt engineering": [
+    "promptengineering",
+    "prompt-engineering",
+    "engineering prompt"
+  ],
+  "protobuf": [
+    "protobuf tool"
+  ],
+  "pulsar": [
+    "pulsar tool"
+  ],
+  "pulumi": [
+    "pulumi tool"
+  ],
+  "puppet": [
+    "puppet tool"
+  ],
+  "pylint": [
+    "pylint tool"
+  ],
+  "python": [
+    "python3",
+    "py",
+    "python 3",
+    "cpython"
+  ],
+  "pytorch": [
+    "torch",
+    "py torch",
+    "pytorch lightning",
+    "pt"
+  ],
+  "quasar": [
+    "quasar tool"
+  ],
+  "r": [
+    "r language",
+    "rstats",
+    "r programming",
+    "cran"
+  ],
+  "rabbitmq": [
+    "rabbitmq tool"
+  ],
+  "rag": [
+    "rag tool"
+  ],
+  "ray": [
+    "ray tool"
+  ],
+  "rds": [
+    "aws rds",
+    "relational database service",
+    "amazon rds",
+    "rds instance"
+  ],
+  "react": [
+    "reactjs",
+    "react.js",
+    "react js",
+    "redux react"
+  ],
+  "react native": [
+    "reactnative",
+    "react-native",
+    "native react"
+  ],
+  "redis": [
+    "redis cache",
+    "redisdb",
+    "in-memory redis",
+    "rediss"
+  ],
+  "redux": [
+    "redux tool"
+  ],
+  "rest api": [
+    "restful",
+    "restful api",
+    "rest service",
+    "rest endpoints"
+  ],
+  "rq": [
+    "rq tool"
+  ],
+  "rtos": [
+    "rtos tool"
+  ],
+  "ruby": [
+    "ruby on rails",
+    "rb",
+    "rubylang",
+    "rails ruby"
+  ],
+  "ruff": [
+    "ruff tool"
+  ],
+  "runbooks": [
+    "runbooks tool"
+  ],
+  "rust": [
+    "rustlang",
+    "cargo",
+    "rustc",
+    "rust lang"
+  ],
+  "rxjs": [
+    "rxjs tool"
+  ],
+  "s3": [
+    "aws s3",
+    "simple storage service",
+    "s3 bucket",
+    "amazon s3"
+  ],
+  "salesforce": [
+    "salesforce tool"
+  ],
+  "saltstack": [
+    "saltstack tool"
+  ],
+  "saml": [
+    "saml tool"
+  ],
+  "samza": [
+    "samza tool"
+  ],
+  "sap": [
+    "sap tool"
+  ],
+  "scala": [
+    "scala lang",
+    "akka scala",
+    "sbt scala",
+    "scala2"
+  ],
+  "scikit-learn": [
+    "sklearn",
+    "scikit learn",
+    "sk learn",
+    "sci kit learn"
+  ],
+  "scrum": [
+    "scrum master",
+    "scrum framework",
+    "sprints",
+    "scrm"
+  ],
+  "secrets manager": [
+    "secretsmanager",
+    "secrets-manager",
+    "manager secrets"
+  ],
+  "segment": [
+    "segment tool"
+  ],
+  "selenium": [
+    "selenium tool"
+  ],
+  "seo": [
+    "seo tool"
+  ],
+  "sequelize": [
+    "sequelize tool"
+  ],
+  "service bus": [
+    "servicebus",
+    "service-bus",
+    "bus service"
+  ],
+  "shopify": [
+    "shopify tool"
+  ],
+  "snowflake": [
+    "snowflake db",
+    "snow flake",
+    "sf warehouse",
+    "snowflake cloud"
+  ],
+  "snyk": [
+    "snyk tool"
+  ],
+  "soap": [
+    "soap tool"
+  ],
+  "socket.io": [
+    "socket.io tool"
+  ],
+  "solidity": [
+    "solidity tool"
+  ],
+  "solr": [
+    "solr tool"
+  ],
+  "sonarqube": [
+    "sonarqube tool"
+  ],
+  "spark": [
+    "apache spark",
+    "pyspark",
+    "spark sql",
+    "spark streaming"
+  ],
+  "splunk": [
+    "splunk tool"
+  ],
+  "spring": [
+    "spring framework",
+    "spring core",
+    "springmvc",
+    "springboot"
+  ],
+  "sql": [
+    "structured query language",
+    "sql query",
+    "t-sql",
+    "ansi sql"
+  ],
+  "sqlalchemy": [
+    "sqlalchemy tool"
+  ],
+  "sqlite": [
+    "sqlite3",
+    "sqlite db",
+    "embedded sqlite",
+    "sql lite"
+  ],
+  "sre": [
+    "sre tool"
+  ],
+  "storybook": [
+    "storybook tool"
+  ],
+  "supabase": [
+    "supabase tool"
+  ],
+  "svelte": [
+    "svelte tool"
+  ],
+  "swagger": [
+    "swagger tool"
+  ],
+  "swift": [
+    "swiftlang",
+    "ios swift",
+    "swiftui",
+    "swift 5"
+  ],
+  "swiftui": [
+    "swiftui tool"
+  ],
+  "system design": [
+    "software architecture",
+    "high level design",
+    "hld",
+    "scalable design"
+  ],
+  "tableau": [
+    "tableau desktop",
+    "tableu",
+    "tableau dashboards",
+    "tbl"
+  ],
+  "tailwindcss": [
+    "tailwindcss tool"
+  ],
+  "tauri": [
+    "tauri tool"
+  ],
+  "tcp/ip": [
+    "ip tcp",
+    "tcp/ip tool"
+  ],
+  "tdd": [
+    "test driven development",
+    "test-first",
+    "tdd approach",
+    "t d d"
+  ],
+  "teamcity": [
+    "teamcity tool"
+  ],
+  "tensorflow": [
+    "tf keras",
+    "tensor flow",
+    "tensorflow2",
+    "tf2"
+  ],
+  "terraform": [
+    "tf",
+    "iac terraform",
+    "hashicorp terraform",
+    "terra form"
+  ],
+  "terraform cloud": [
+    "terraformcloud",
+    "terraform-cloud",
+    "cloud terraform"
+  ],
+  "timescaledb": [
+    "timescaledb tool"
+  ],
+  "tomcat": [
+    "tomcat tool"
+  ],
+  "tox": [
+    "tox tool"
+  ],
+  "travis ci": [
+    "travisci",
+    "travis-ci",
+    "ci travis"
+  ],
+  "trino": [
+    "trino tool"
+  ],
+  "trivy": [
+    "trivy tool"
+  ],
+  "typeorm": [
+    "typeorm tool"
+  ],
+  "typescript": [
+    "ts",
+    "type script",
+    "typescriptlang",
+    "tslang"
+  ],
+  "ui testing": [
+    "uitesting",
+    "ui-testing",
+    "testing ui"
+  ],
+  "unity": [
+    "unity tool"
+  ],
+  "unix": [
+    "unix tool"
+  ],
+  "unleash": [
+    "unleash tool"
+  ],
+  "unreal engine": [
+    "unrealengine",
+    "unreal-engine",
+    "engine unreal"
+  ],
+  "uvicorn": [
+    "uvicorn tool"
+  ],
+  "ux research": [
+    "uxresearch",
+    "ux-research",
+    "research ux"
+  ],
+  "vault": [
+    "vault tool"
+  ],
+  "vault agent": [
+    "vaultagent",
+    "vault-agent",
+    "agent vault"
+  ],
+  "vector database": [
+    "vectordatabase",
+    "vector-database",
+    "database vector"
+  ],
+  "virtualenv": [
+    "virtualenv tool"
+  ],
+  "vite": [
+    "vite tool"
+  ],
+  "vitest": [
+    "vitest tool"
+  ],
+  "vue": [
+    "vuejs",
+    "vue.js",
+    "vue js",
+    "nuxt vue"
+  ],
+  "wcag": [
+    "wcag tool"
+  ],
+  "weaviate": [
+    "weaviate tool"
+  ],
+  "web3": [
+    "web3 tool"
+  ],
+  "webpack": [
+    "webpack tool"
+  ],
+  "webrtc": [
+    "webrtc tool"
+  ],
+  "websockets": [
+    "websockets tool"
+  ],
+  "wireshark": [
+    "wireshark tool"
+  ],
+  "wordpress": [
+    "wordpress tool"
+  ],
+  "xamarin": [
+    "xamarin tool"
+  ],
+  "xgboost": [
+    "xgboost tool"
+  ],
+  "yarn": [
+    "yarn tool"
+  ],
+  "zeromq": [
+    "zeromq tool"
+  ],
+  "zipkin": [
+    "zipkin tool"
+  ],
+  "zsh": [
+    "zsh tool"
+  ]
+}

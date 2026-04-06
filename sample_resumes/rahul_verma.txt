@@ -1,0 +1,5 @@
+Rahul Verma
+Backend Developer
+Worked with Python3, PostgreSQL, Flask, Docker-compose, Kafka, AWS Lambda
+Experience: 4+ years of software engineering experience
+Education: Bachelor of Technology
