@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+webui/node_modules/
+webui/dist/
+ats/cache/
+ats/logs/
+ats/output/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
