@@ -75,7 +75,13 @@ def parse_pdf(file_path: str) -> str:
     with open(file_path, "rb") as fp:
         interpreter = PDFPageInterpreter(resource_manager, converter)
         for page in PDFPage.get_pages(fp, check_extractable=True):
-            interpreter.process_page(page)
+            try:
+                interpreter.process_page(page)
+            except Exception as page_exc:
+                # Skip malformed pages instead of failing whole document.
+                # Logged at debug to avoid noisy bulk-run output.
+                logger.debug("Skipping malformed PDF page in %s: %s", file_path, page_exc)
+                continue
 
     text = buffer.getvalue()
     converter.close()

@@ -15,6 +15,7 @@ def compute_scores(
     cosine_similarity: float,
     education_level: str,
     job: JobProfile,
+    semantic_enabled: bool = True,
 ) -> ScoreBreakdown:
     if len(job.required_skills) == 0:
         skills_score = 100.0
@@ -27,7 +28,7 @@ def compute_scores(
     else:
         experience_score = min((experience_years / job.min_experience_years) * 100.0, 100.0)
 
-    semantic_score = max(0.0, min(cosine_similarity * 100.0, 100.0))
+    semantic_score = max(0.0, min(cosine_similarity * 100.0, 100.0)) if semantic_enabled else 0.0
 
     required_level = EDUCATION_LEVELS.get(job.required_education.lower(), 1)
     actual_level = EDUCATION_LEVELS.get(education_level.lower(), 1)
@@ -38,12 +39,22 @@ def compute_scores(
     else:
         education_score = 40.0
 
-    final = (
-        config.WEIGHT_SKILLS * skills_score
-        + config.WEIGHT_EXPERIENCE * experience_score
-        + config.WEIGHT_SEMANTIC * semantic_score
-        + config.WEIGHT_EDUCATION * education_score
-    )
+    if semantic_enabled:
+        final = (
+            config.WEIGHT_SKILLS * skills_score
+            + config.WEIGHT_EXPERIENCE * experience_score
+            + config.WEIGHT_SEMANTIC * semantic_score
+            + config.WEIGHT_EDUCATION * education_score
+        )
+    else:
+        # Re-normalize weights when semantic stage is disabled.
+        non_semantic_total = config.WEIGHT_SKILLS + config.WEIGHT_EXPERIENCE + config.WEIGHT_EDUCATION
+        if non_semantic_total <= 0:
+            non_semantic_total = 1.0
+        ws = config.WEIGHT_SKILLS / non_semantic_total
+        we = config.WEIGHT_EXPERIENCE / non_semantic_total
+        wed = config.WEIGHT_EDUCATION / non_semantic_total
+        final = (ws * skills_score) + (we * experience_score) + (wed * education_score)
 
     return ScoreBreakdown(
         skills=round(skills_score, 2),

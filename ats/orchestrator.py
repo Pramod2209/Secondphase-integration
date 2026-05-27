@@ -5,7 +5,7 @@ import hashlib
 import json
 import uuid
 from collections import Counter
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from pathlib import Path
 from time import perf_counter
 from typing import Dict, List, Optional, Tuple
@@ -14,10 +14,10 @@ import numpy as np
 from rich.console import Console
 
 from . import config
-from .embedder import Embedder, encode_batch_worker, encode_single_worker
+from .embedder import Embedder, encode_batch_worker
 from .extractor import extract_all, extract_batch, load_taxonomy
 from .logger import Timer, get_logger
-from .matcher import match
+from .matcher import match, match_skills_only
 from .parser import parse_docx, parse_file, read_raw_fast
 from .prefilter import prefilter
 from .resources import detect_and_tune
@@ -28,6 +28,7 @@ logger = get_logger(__name__)
 console = Console()
 FEATURE_CACHE_DIR = config.CACHE_DIR / "features"
 FEATURE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_FEATURE_CACHE_VERSION = "v2"
 
 
 def _empty_score() -> ScoreBreakdown:
@@ -43,7 +44,8 @@ def _chunk(items: List[str], size: int) -> List[List[str]]:
 
 
 def _text_hash(text: str) -> str:
-    return hashlib.sha256(text[:2000].encode("utf-8", errors="ignore")).hexdigest()[:16]
+    payload = f"{_FEATURE_CACHE_VERSION}\n{text[:2000]}"
+    return hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()[:16]
 
 
 def _feature_cache_path(text: str) -> Path:
@@ -133,11 +135,12 @@ async def _process_batch(
     batch_paths: List[str],
     job: JobProfile,
     taxonomy: Dict[str, List[str]],
-    jd_embedding: np.ndarray,
+    jd_embedding: Optional[np.ndarray],
     resources: SystemResources,
     sem: asyncio.Semaphore,
     thread_pool: ThreadPoolExecutor,
-    process_pool: ProcessPoolExecutor,
+    process_pool: Optional[ProcessPoolExecutor],
+    semantic_enabled: bool,
 ) -> Tuple[List[ResumeResult], int]:
     async with sem:
         loop = asyncio.get_running_loop()
@@ -202,28 +205,35 @@ async def _process_batch(
 
         with Timer() as extract_timer:
             if missing_texts:
-                fresh = await loop.run_in_executor(process_pool, extract_batch, missing_texts, taxonomy)
+                fresh = await loop.run_in_executor(thread_pool, extract_batch, missing_texts, taxonomy)
                 for idx, item in zip(missing_indices, fresh):
                     extracted[idx] = item
                     _save_cached_features(parsed_texts[idx], item)
 
         extracted = [item for item in extracted if item is not None]
 
-        # D) embedding in process pool with cache
+        # D) embedding (optional): skip for high-throughput bulk mode.
+        embeddings: Optional[np.ndarray] = None
+        cache_hits = 0
         with Timer() as embed_timer:
-            embeddings, cache_hits = await loop.run_in_executor(
-                process_pool,
-                encode_batch_worker,
-                parsed_texts,
-                resources.embedding_batch_size,
-            )
+            if semantic_enabled and process_pool is not None and jd_embedding is not None:
+                embeddings, cache_hits = await loop.run_in_executor(
+                    process_pool,
+                    encode_batch_worker,
+                    parsed_texts,
+                    resources.embedding_batch_size,
+                )
 
         # E) match + score + explanation
         for idx, path in enumerate(parsed_paths):
             data: ExtractionResult = extracted[idx]
-            emb = embeddings[idx]
+            emb = embeddings[idx] if embeddings is not None else None
             with Timer() as match_timer:
-                cosine, matched, missing, pref_bonus = match(emb, jd_embedding, data.skills, job)
+                if semantic_enabled and emb is not None and jd_embedding is not None:
+                    cosine, matched, missing, pref_bonus = match(emb, jd_embedding, data.skills, job)
+                else:
+                    matched, missing, pref_bonus = match_skills_only(data.skills, job)
+                    cosine = 0.0
             with Timer() as score_timer:
                 score = compute_scores(
                     matched_skills=matched,
@@ -233,6 +243,7 @@ async def _process_batch(
                     cosine_similarity=cosine,
                     education_level=str(data.education_level),
                     job=job,
+                    semantic_enabled=semantic_enabled,
                 )
 
             resume = ResumeResult(
@@ -252,7 +263,7 @@ async def _process_batch(
                 stage_timings={
                     "parse": round(parse_timings.get(path, 0.0), 4),
                     "extract": round(extract_timer.elapsed / max(1, len(parsed_paths)), 4),
-                    "embed": round(embed_timer.elapsed / max(1, len(parsed_paths)), 4),
+                    "embed": round(embed_timer.elapsed / max(1, len(parsed_paths)), 4) if semantic_enabled else 0.0,
                     "match": round(match_timer.elapsed, 4),
                     "score": round(score_timer.elapsed, 4),
                 },
@@ -331,40 +342,43 @@ async def run_bulk(
     start = perf_counter()
     resources = resources or detect_and_tune()
     taxonomy = load_taxonomy()
-
+    semantic_enabled = config.USE_SEMANTIC_EMBEDDING_BULK
+    # Prepare embedding and concurrency primitives
     loop = asyncio.get_running_loop()
-    with ProcessPoolExecutor(max_workers=resources.process_workers) as process_pool:
-        jd_embedding, _ = await loop.run_in_executor(
-            process_pool,
-            encode_single_worker,
-            job.description,
-            resources.embedding_batch_size,
-        )
+    jd_embedding: Optional[np.ndarray] = None
+    if semantic_enabled:
+        embedder_local = Embedder(batch_size=resources.embedding_batch_size)
+        jd_embedding, _ = embedder_local.encode_single(job.description)
 
-        batches = _chunk(resume_paths, resources.batch_size)
-        sem = asyncio.Semaphore(resources.max_concurrent_batches)
+    batches = _chunk(resume_paths, resources.batch_size)
+    sem = asyncio.Semaphore(resources.max_concurrent_batches)
 
-        all_results: List[ResumeResult] = []
-        total_cache_hits = 0
+    all_results: List[ResumeResult] = []
+    total_cache_hits = 0
 
-        with ThreadPoolExecutor(max_workers=resources.thread_workers) as thread_pool:
-            tasks = [
-                _process_batch(
-                    batch_paths=batch,
-                    job=job,
-                    taxonomy=taxonomy,
-                    jd_embedding=jd_embedding,
-                    resources=resources,
-                    sem=sem,
-                    thread_pool=thread_pool,
-                    process_pool=process_pool,
-                )
-                for batch in batches
-            ]
-            batch_outputs = await asyncio.gather(*tasks)
-            for batch_results, batch_cache_hits in batch_outputs:
-                all_results.extend(batch_results)
-                total_cache_hits += batch_cache_hits
+    # Use a thread pool for IO/CPU-light tasks and optional process pool for embeddings
+    with ThreadPoolExecutor(max_workers=resources.thread_workers) as thread_pool:
+        process_pool = ProcessPoolExecutor(max_workers=resources.process_workers) if semantic_enabled else None
+        tasks = [
+            _process_batch(
+                batch_paths=batch,
+                job=job,
+                taxonomy=taxonomy,
+                jd_embedding=jd_embedding,
+                resources=resources,
+                sem=sem,
+                thread_pool=thread_pool,
+                process_pool=process_pool,
+                semantic_enabled=semantic_enabled,
+            )
+            for batch in batches
+        ]
+        batch_outputs = await asyncio.gather(*tasks)
+        for batch_results, batch_cache_hits in batch_outputs:
+            all_results.extend(batch_results)
+            total_cache_hits += batch_cache_hits
+        if process_pool is not None:
+            process_pool.shutdown(wait=True, cancel_futures=False)
 
     processed = [r for r in all_results if r.status == "processed"]
     filtered = [r for r in all_results if r.status == "filtered"]
@@ -391,6 +405,7 @@ async def run_bulk(
         "most_common_missing_skill_count": common_count,
         "cache_hits": total_cache_hits,
         "cache_hit_rate": round((total_cache_hits / len(processed)) if processed else 0.0, 3),
+        "semantic_enabled": semantic_enabled,
     }
 
     output = ATSOutput(

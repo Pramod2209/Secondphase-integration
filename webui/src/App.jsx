@@ -28,6 +28,15 @@ function SectionCard({ title, subtitle, children }) {
   );
 }
 
+function formatSeconds(seconds) {
+  const value = Number(seconds || 0);
+  if (!Number.isFinite(value) || value < 0) return "0.0s";
+  if (value < 60) return `${value.toFixed(1)}s`;
+  const minutes = Math.floor(value / 60);
+  const remaining = (value - minutes * 60).toFixed(1);
+  return `${minutes}m ${remaining}s`;
+}
+
 function JobForm({ job, setJob, prefix }) {
   return (
     <div className="grid two">
@@ -128,11 +137,45 @@ export default function App() {
     setError("");
     setLoadingBulk(true);
     try {
-      const fd = buildForm(bulkJob, { top_n: topN });
-      bulkFiles.forEach((f) => fd.append("resumes", f));
-      const res = await fetch(`${API_BASE}/api/bulk`, { method: "POST", body: fd });
-      if (!res.ok) throw new Error(await res.text());
-      setBulkResult(await res.json());
+      const bulkStart = performance.now();
+      const BATCH_SIZE = 900; // Safe limit (Starlette limit is 1000)
+      const batches = [];
+      for (let i = 0; i < bulkFiles.length; i += BATCH_SIZE) {
+        batches.push(bulkFiles.slice(i, i + BATCH_SIZE));
+      }
+
+      const batchResults = [];
+      for (let bIdx = 0; bIdx < batches.length; bIdx++) {
+        const batch = batches[bIdx];
+        setError(`Processing batch ${bIdx + 1} of ${batches.length}...`);
+        
+        const fd = buildForm(bulkJob, { top_n: topN });
+        batch.forEach((f) => fd.append("resumes", f));
+        
+        const res = await fetch(`${API_BASE}/api/bulk`, { method: "POST", body: fd });
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Batch ${bIdx + 1} failed: ${errText}`);
+        }
+        batchResults.push(await res.json());
+      }
+
+      // Aggregate results from all batches
+      const aggregated = {
+        total_submitted: batchResults.reduce((sum, r) => sum + r.total_submitted, 0),
+        total_processed: batchResults.reduce((sum, r) => sum + r.total_processed, 0),
+        total_filtered: batchResults.reduce((sum, r) => sum + r.total_filtered, 0),
+        total_failed: batchResults.reduce((sum, r) => sum + r.total_failed, 0),
+        total_time_taken_seconds: (performance.now() - bulkStart) / 1000,
+        top_candidates: batchResults
+          .flatMap((r) => r.top_candidates || [])
+          .sort((a, b) => (b.scores?.final || 0) - (a.scores?.final || 0))
+          .slice(0, topN),
+        execution_summary: batchResults[batchResults.length - 1]?.execution_summary,
+      };
+
+      setBulkResult(aggregated);
+      setError("");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -213,6 +256,9 @@ export default function App() {
               <p>
                 submitted {bulkResult.total_submitted} | processed {bulkResult.total_processed} |
                 filtered {bulkResult.total_filtered} | failed {bulkResult.total_failed}
+              </p>
+              <p>
+                <strong>Total time taken:</strong> {formatSeconds(bulkResult.total_time_taken_seconds)}
               </p>
               <table>
                 <thead>

@@ -53,6 +53,25 @@ class ResumeResult:
 
 
 @dataclass
+class ResumeResultResponse:
+    """Response schema for API responses (excludes large embedding vectors)."""
+    candidate_id: str
+    file_path: str
+    name: str
+    parsed_text: str
+    extracted_skills: List[str]
+    experience_years: float
+    education_level: str
+    scores: ScoreBreakdown
+    missing_skills: List[str]
+    matched_skills: List[str]
+    explanation: str
+    status: str
+    stage_timings: Dict[str, float]
+    error_message: Optional[str] = None
+
+
+@dataclass
 class ATSOutput:
     job_id: str
     total_submitted: int
@@ -61,8 +80,8 @@ class ATSOutput:
     total_failed: int
     time_taken_seconds: float
     throughput_per_second: float
-    top_candidates: List[ResumeResult]
-    all_results: List[ResumeResult]
+    top_candidates: List[ResumeResultResponse]
+    all_results: List[ResumeResultResponse]
     summary_stats: Dict[str, Any]
 
 

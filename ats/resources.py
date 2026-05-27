@@ -13,24 +13,61 @@ def detect_and_tune() -> SystemResources:
     cpu_cores = max(os.cpu_count() or 1, 1)
     available_ram_gb = psutil.virtual_memory().available / (1024 ** 3)
 
-    thread_workers = min(cpu_cores * 2, 16)
-    process_workers = max(cpu_cores - 1, 2)
-
-    if available_ram_gb >= 16:
-        embedding_batch_size = 128
-    elif available_ram_gb >= 8:
-        embedding_batch_size = 64
+    # Low-RAM systems should prioritize fewer workers to avoid memory pressure.
+    if available_ram_gb < 4:
+        default_thread_workers = min(max(cpu_cores, 8), 24)
+        default_process_workers = 2
+    elif available_ram_gb < 8:
+        default_thread_workers = min(max(cpu_cores, 12), 32)
+        default_process_workers = min(max(cpu_cores // 4, 2), 4)
     else:
-        embedding_batch_size = 32
+        default_thread_workers = min(cpu_cores * 2, 64)
+        default_process_workers = min(max(cpu_cores // 2, 2), 12)
 
-    if cpu_cores >= 8:
-        batch_size = 100
-    elif cpu_cores >= 4:
-        batch_size = 50
+    # Allow environment overrides for experimentation and tuning
+    thread_workers = int(os.environ.get("ATS_THREAD_WORKERS", default_thread_workers))
+    process_workers = int(os.environ.get("ATS_PROCESS_WORKERS", default_process_workers))
+
+    # Aggressive embedding batch sizes when RAM is available; fall back for low-memory systems
+    if os.environ.get("ATS_EMBEDDING_BATCH_SIZE"):
+        embedding_batch_size = int(os.environ.get("ATS_EMBEDDING_BATCH_SIZE"))
     else:
-        batch_size = 25
+        if available_ram_gb >= 32:
+            embedding_batch_size = 256
+        elif available_ram_gb >= 16:
+            embedding_batch_size = 128
+        elif available_ram_gb >= 8:
+            embedding_batch_size = 64
+        elif available_ram_gb >= 4:
+            embedding_batch_size = 32
+        else:
+            embedding_batch_size = 16
 
-    max_concurrent_batches = max(cpu_cores // 2, 2)
+    # Larger batch sizes on many cores; keep moderate defaults for low RAM.
+    if os.environ.get("ATS_BATCH_SIZE"):
+        batch_size = int(os.environ.get("ATS_BATCH_SIZE"))
+    else:
+        if available_ram_gb < 4:
+            batch_size = 120
+        elif cpu_cores >= 32:
+            batch_size = 300
+        elif cpu_cores >= 16:
+            batch_size = 200
+        elif cpu_cores >= 8:
+            batch_size = 150
+        elif cpu_cores >= 4:
+            batch_size = 100
+        else:
+            batch_size = 50
+
+    # Number of batches to run concurrently. Higher on many-core machines but bounded.
+    if os.environ.get("ATS_MAX_CONCURRENT_BATCHES"):
+        max_concurrent_batches = int(os.environ.get("ATS_MAX_CONCURRENT_BATCHES"))
+    else:
+        max_concurrent_batches = min(max(cpu_cores // 3, 2), 12)
+        # if RAM is very low, be conservative
+        if available_ram_gb < 4:
+            max_concurrent_batches = min(max_concurrent_batches, 4)
 
     tuned = SystemResources(
         cpu_cores=cpu_cores,

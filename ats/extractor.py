@@ -29,8 +29,10 @@ EDUCATION_LEVELS = {
     "none": 1,
 }
 
+_MONTH_PATTERN = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+
 _DATE_PATTERN = re.compile(
-    r"(?P<start>(?:[A-Za-z]{3,9}\s+)?\d{4})\s*(?:-|–|to)\s*(?P<end>(?:[A-Za-z]{3,9}\s+)?\d{4}|present|current)",
+    rf"\b(?P<start>(?:{_MONTH_PATTERN}\s+)?\d{{4}})\s*(?:-|–|to)?\s*(?P<end>(?:{_MONTH_PATTERN}\s+)?\d{{4}}|present|current)\b",
     re.IGNORECASE,
 )
 
@@ -96,6 +98,10 @@ _WORK_CONTEXT_TERMS = {
 }
 
 
+def _normalize_for_search(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
 @lru_cache(maxsize=1)
 def load_taxonomy() -> Dict[str, List[str]]:
     if config.SKILL_TAXONOMY_PATH.exists():
@@ -145,6 +151,7 @@ def _merge_ranges(ranges: List[Tuple[datetime, datetime]]) -> List[Tuple[datetim
 
 def extract_experience(text: str) -> float:
     lower_text = text.lower()
+    normalized_text = _normalize_for_search(text)
 
     strategy1 = 0.0
     for pattern in _EXP_PATTERNS:
@@ -158,18 +165,18 @@ def extract_experience(text: str) -> float:
 
     ranges: List[Tuple[datetime, datetime]] = []
     now = datetime.utcnow()
-    for match in _DATE_PATTERN.finditer(text):
+    for match in _DATE_PATTERN.finditer(normalized_text):
         start_raw = match.group("start")
         end_raw = match.group("end")
         ctx_start = max(0, match.start() - 80)
-        ctx_end = min(len(lower_text), match.end() + 80)
-        context = lower_text[ctx_start:ctx_end]
+        ctx_end = min(len(normalized_text), match.end() + 80)
+        context = normalized_text[ctx_start:ctx_end]
 
         has_edu_context = any(term in context for term in _EDUCATION_CONTEXT_TERMS)
         has_work_context = any(term in context for term in _WORK_CONTEXT_TERMS)
 
-        # Ignore academic periods and require work-like context for date-range summation.
-        if has_edu_context or not has_work_context:
+        # Ignore academic periods unless the same window also looks like work history.
+        if has_edu_context and not has_work_context:
             continue
 
         try:
@@ -196,9 +203,39 @@ def extract_experience(text: str) -> float:
 
 def extract_education(text: str) -> str:
     lower_text = text.lower()
-    for label, patterns in _EDUCATION_PATTERNS:
+    normalized_text = _normalize_for_search(text)
+
+    education_checks = [
+        ("phd", [r"\bph\s*d\b", r"\bdoctorate\b"]),
+        (
+            "master",
+            [
+                r"\bmaster'?s?\b",
+                r"\bm\s*\.?\s*tech\b",
+                r"\bm\s*\.?\s*s\b",
+                r"\bm\s*\.?\s*sc\b",
+                r"\bmba\b",
+                r"\bm\s*\.?\s*e\b",
+            ],
+        ),
+        (
+            "bachelor",
+            [
+                r"\bbachelor'?s?\b",
+                r"\bb\s*\.?\s*tech\b",
+                r"\bb\s*\.?\s*e\b",
+                r"\bb\s*\.?\s*sc\b",
+                r"\bb\s*\.?\s*s\b",
+                r"\bbs\b",
+            ],
+        ),
+        ("diploma", [r"\bdiploma\b"]),
+        ("associate", [r"\bassociate\b"]),
+    ]
+
+    for label, patterns in education_checks:
         for pattern in patterns:
-            if re.search(pattern, lower_text):
+            if re.search(pattern, lower_text) or re.search(pattern, normalized_text):
                 return label
     return "none"
 
