@@ -8,13 +8,14 @@ from __future__ import annotations
 import hashlib
 import traceback
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from typing import List, Optional
 
 from . import config
 from .embedder import semantic_chunks
-from .extractor import extract_all
+from .extractor import extract_all, using_reference_date
 from .matcher import match_job_skills
 from .parser import parse_document
 from .schema import JobProfile
@@ -94,7 +95,9 @@ def analyze_file(index: int, path: str, display_path: str, job: JobProfile, want
             return result
 
         start = perf_counter()
-        features = extract_all(parsed.text, display_text=parsed.display_text, file_name=file_name)
+        ref = datetime.strptime(job.reference_date, "%Y-%m-%d") if job.reference_date else None
+        with using_reference_date(ref):
+            features = extract_all(parsed.text, display_text=parsed.display_text, file_name=file_name)
         match = match_job_skills(parsed.text, job, features.skill_anchors)
         result.skills = features.skills
         result.experience_years = features.experience_years

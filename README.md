@@ -151,8 +151,9 @@ Every POST needs the header `X-ATS-Client: <anything>`. This blocks cross-site f
 | POST | `/api/bulk-parallel-folder` | Screen a folder on this machine (`folder_path`). **Disabled** unless `ATS_ALLOWED_FOLDER_ROOTS` lists the allowed directories. |
 
 Job fields are `title`, `description`, `required_skills` / `preferred_skills` (comma-separated),
-`min_experience_years` (0-50) and `required_education` (any / diploma / associate / bachelor /
-master / phd). Invalid input returns 422 with a readable message. Responses never contain resume
+`min_experience_years` (0-50), `required_education` (any / diploma / associate / bachelor /
+master / phd) and optional `reference_date` (YYYY-MM-DD: "present" in resumes is counted to this date;
+the UI calls it "Resumes received on"). Invalid input returns 422 with a readable message. Responses never contain resume
 text or embedding vectors.
 
 ## Configuration (environment variables)
@@ -266,7 +267,7 @@ is 0.991, with 9 of the top 10 and 22 of the top 25 the same. The best recovered
 .venv\Scripts\python -m unittest discover -s tests -t .
 ```
 
-150 tests cover parsing (including generated scanned PDFs for OCR), skills, experience, education,
+156 tests cover parsing (including generated scanned PDFs for OCR), skills, experience, education,
 names, skill matching tiers across domains (equivalents, categories, related skills, weak contextual evidence, PDF bullet glyphs, ordinary-word false positives), score bounds and edge cases, ranking order on controlled candidates, bulk runs (1, 2, 5 and
 100 files, duplicates, corrupt/empty/unsupported files), caching, every API endpoint, and that
 parser workers exit when the server process is force-killed (no orphaned processes). Fixtures
@@ -303,8 +304,8 @@ holds older ad-hoc scripts that call a running server; they are not part of the 
 - When one job skill contains another ("manufacturing" and "lean manufacturing"), the longer one
   takes the mention.
 - OCR adds about 2–5 s per scanned resume and depends on scan quality.
-- "Present" is measured to today, so an old resume overstates current experience unless
-  `ATS_REFERENCE_DATE` is set.
+- "Present" is measured to today, so an old resume overstates current experience unless the
+  request's `reference_date` ("Resumes received on" in the UI) or `ATS_REFERENCE_DATE` is set.
 - The semantic score is raw cosine × 100. Unrelated documents still score 5–25.
 - The prefilter removes resumes that mention none of the job's skills. Disable it
   (`ATS_PREFILTER=0`) if skills may be absent from otherwise relevant resumes.

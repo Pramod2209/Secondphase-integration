@@ -122,11 +122,11 @@ def safe_display_name(filename: Optional[str]) -> str:
 
 
 def _job_from_form(title: str, description: str, required_skills: str, preferred_skills: str,
-                   min_experience_years: str, required_education: str):
+                   min_experience_years: str, required_education: str, reference_date: str = ""):
     try:
         return build_job_profile(title=title, description=description, required_skills=required_skills,
                                  preferred_skills=preferred_skills, min_experience_years=min_experience_years,
-                                 required_education=required_education)
+                                 required_education=required_education, reference_date=reference_date)
     except JobValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -230,12 +230,13 @@ async def single_screen(
     preferred_skills: str = Form(""),
     min_experience_years: str = Form("0"),
     required_education: str = Form("any"),
+    reference_date: str = Form(""),
     debug: bool = Form(False),
 ) -> Any:
     if not resume.filename:
         raise HTTPException(status_code=400, detail="No resume provided")
     job = _job_from_form(title, description, required_skills, preferred_skills, min_experience_years,
-                         required_education)
+                         required_education, reference_date)
     display = safe_display_name(resume.filename)
     async with _semaphore():
         with tempfile.TemporaryDirectory(prefix="ats_single_api_") as temp_dir:
@@ -257,6 +258,7 @@ async def bulk_screen(
     preferred_skills: str = Form(""),
     min_experience_years: str = Form("0"),
     required_education: str = Form("any"),
+    reference_date: str = Form(""),
     top_n: str = Form("10"),
     request_id: str = Form(""),
 ) -> Any:
@@ -265,7 +267,7 @@ async def bulk_screen(
     if len(resumes) > config.MAX_FILES_PER_REQUEST:
         raise HTTPException(status_code=413, detail=f"Too many files (max {config.MAX_FILES_PER_REQUEST} per request)")
     job = _job_from_form(title, description, required_skills, preferred_skills, min_experience_years,
-                         required_education)
+                         required_education, reference_date)
     top = _validate_top_n(top_n)
     key = request_id.strip()[:64] or None
     async with _semaphore():
@@ -298,6 +300,7 @@ async def bulk_screen_folder(
     preferred_skills: str = Form(""),
     min_experience_years: str = Form("0"),
     required_education: str = Form("any"),
+    reference_date: str = Form(""),
     top_n: str = Form("10"),
     request_id: str = Form(""),
 ) -> Any:
@@ -311,7 +314,7 @@ async def bulk_screen_folder(
     if not folder.is_dir():
         raise HTTPException(status_code=400, detail="Folder not found")
     job = _job_from_form(title, description, required_skills, preferred_skills, min_experience_years,
-                         required_education)
+                         required_education, reference_date)
     top = _validate_top_n(top_n)
     files = list_resume_files(str(folder))
     if not files:

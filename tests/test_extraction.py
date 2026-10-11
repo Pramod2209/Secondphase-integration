@@ -95,6 +95,34 @@ class ExperienceTests(unittest.TestCase):
         self.assertEqual(self.exp("CGPA 7.77/10"), 0.0)
         self.assertEqual(self.exp("Phone: 9876 2020, PIN 600001"), 0.0)
 
+    def test_degree_years_next_to_cgpa_are_not_a_job(self):
+        # A two-column PDF put the degree ("2016 - 2020" + "CGPA - 7.60 | 76.0") inside the experience section;
+        # removing the GPA value must not remove the word that marks those years as education.
+        text = ("Work Experience\nNetwork Engineer, Demo Infra Pvt Ltd\nMarch 2021 - Aug 2021\n"
+                "Configured routers and switches for branch offices\n2016 - 2020\nCGPA - 7.60 | 76.0\n"
+                "System Engineer, Sample Data Solutions\nOctober 2021 - Aug 2025\n")
+        self.assertAlmostEqual(self.exp(text), 4.3, delta=0.1)  # 0.4 + 3.9 years; not + 4 degree years
+        # a real year-only job range without any grade nearby still counts
+        self.assertAlmostEqual(self.exp("Work Experience\nSupport Engineer, Demo Pvt Ltd\n2016 - 2020\n"), 4.0, delta=0.1)
+
+    def test_bare_course_years_near_a_degree_are_not_a_job(self):
+        # degree two lines above the bare years, no CGPA: still the course, not a job
+        text = ("Work Experience\nB.E. Electronics\nSample Engineering College\n2015 - 2019\n"
+                "Field Engineer, Demo Telecom Pvt Ltd\nJune 2019 - June 2023\n")
+        self.assertAlmostEqual(self.exp(text), 4.0, delta=0.1)
+        # a job title or employer on the date line keeps a year-only range even near education words
+        text = "Work Experience\nB.Com, Sample College\nAccounts Assistant, Demo Traders Pvt Ltd 2016 - 2020\n"
+        self.assertAlmostEqual(self.exp(text), 4.0, delta=0.1)
+        self.assertEqual(self.exp("Teacher, St. Marys School  2010 - 2015"), 5.0)
+
+    def test_job_misplaced_under_education_heading_counts(self):
+        # two-column PDFs put the job after the Education heading; title/employer is on the line above
+        text = ("Education\nB.Tech Mechanical, Sample Institute of Technology, 2012\n\n"
+                "Production Engineer\nDemo Motors Ltd\nJan 2013 - Dec 2018\n")
+        self.assertAlmostEqual(self.exp(text), 6.0, delta=0.1)
+        # the degree itself under Education is still not a job
+        self.assertEqual(self.exp("Education\nM.Tech, Sample University\nJuly 2014 - June 2016\n"), 0.0)
+
     def test_explicit_statements(self):
         self.assertEqual(self.exp("3 years of experience in Java"), 3.0)
         self.assertEqual(self.exp("3+ years experience"), 3.0)

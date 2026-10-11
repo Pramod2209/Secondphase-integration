@@ -185,3 +185,68 @@ pre {
     grid-column: auto;
   }
 }
+
+/* Bulk results get the full page width below the two input cards. */
+.results {
+  margin-top: 18px;
+}
+
+.results h2 {
+  margin-top: 0;
+}
+
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+table.ranked {
+  min-width: 760px;
+}
+
+td.file {
+  min-width: 200px;
+  max-width: 280px;
+  overflow-wrap: anywhere;
+}
+
+.score-cell {
+  display: grid;
+  gap: 2px;
+  min-width: 150px;
+  white-space: nowrap;
+}
+
+.score-cell strong {
+  font-size: 1.05rem;
+}
+
+.score-cell small {
+  color: #4b647a;
+  line-height: 1.35;
+}
+
+button.why-toggle {
+  margin-top: 4px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: #31618d;
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
+tr.why-row td {
+  background: #f7fafc;
+}
+
+tr.why-row pre {
+  margin: 0;
+  max-height: none;
+  white-space: pre-wrap;
+}
+
+.hint {
+  color: #4b647a;
+  font-size: 0.78rem;
+}

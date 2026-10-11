@@ -13,6 +13,8 @@ class JobProfile:
     preferred_skills: List[str]
     min_experience_years: float
     required_education: str  # any/diploma/associate/bachelor/master/phd
+    # "Present" in resumes is counted up to this date (YYYY-MM-DD); None = ATS_REFERENCE_DATE or today.
+    reference_date: Optional[str] = None
 
 
 @dataclass

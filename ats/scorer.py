@@ -143,6 +143,8 @@ def generate_explanation(result: ResumeResult, job: JobProfile, semantic_enabled
         exp_line = f"{result.experience_years:.1f} years experience (required: {job.min_experience_years:g}+)"
     else:
         exp_line = f"{result.experience_years:.1f} years experience (no minimum required)"
+    if job.reference_date:
+        exp_line += f"; 'present' counted to {job.reference_date}"
     strengths: List[str] = [skills_line, exp_line]
     if semantic_enabled:
         strengths.append(f"Semantic alignment with JD: {result.scores.semantic / 100.0:.2f}")

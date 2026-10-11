@@ -81,6 +81,7 @@ def build_job_profile(
     min_experience_years: float,
     required_education: str,
     job_id: Optional[str] = None,
+    reference_date: Optional[str] = None,
 ) -> JobProfile:
     """Validate and normalize a job. Raises JobValidationError with a user-facing message."""
     title = (title or "").strip()
@@ -103,6 +104,14 @@ def build_job_profile(
             "required_education must be one of: any, diploma, associate, bachelor, master, phd.")
     if not (title or description or required or preferred):
         raise JobValidationError("The job needs at least a title, a description or some skills.")
+    ref = (reference_date or "").strip() or None
+    if ref is not None:
+        try:
+            parsed = datetime.strptime(ref, "%Y-%m-%d")
+        except ValueError as exc:
+            raise JobValidationError("reference_date must be a date in YYYY-MM-DD format.") from exc
+        if not datetime(1990, 1, 1) <= parsed <= datetime.now():
+            raise JobValidationError("reference_date must be between 1990-01-01 and today.")
     req = normalize_skill_list(required)
     pref = [s for s in normalize_skill_list(preferred) if s not in req]
     return JobProfile(
@@ -113,6 +122,7 @@ def build_job_profile(
         preferred_skills=pref,
         min_experience_years=min_exp,
         required_education=education,
+        reference_date=ref,
     )
 
 

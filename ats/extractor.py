@@ -5,6 +5,8 @@ Input text is the parser's normalized form: lowercase ASCII, one source line per
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -117,6 +119,7 @@ _RANGE = re.compile(
     rf"|\s+(?P<end2>{_PRESENT}|(?:{_MONTH_RE})\.?\s*(?:'|[/,]|-(?=\s*\d{{4}}))?\s*(?:\d{{4}}|\d{{2}})(?!\d)))"
 )
 _DATE_ONLY = re.compile(_DATE)
+_YEAR_ONLY = re.compile(r"\s*(?:19|20)\d\d\s*")
 _EDU_LINE = re.compile(
     r"\b(?:universit|college|institute|school|academy|b\.?\s?tech|m\.?\s?tech|b\.\s?e\b|bachelor|master'?s|degree|"
     r"diploma|polytechnic|cgpa|gpa|percentage|hsc|ssc|sslc|cbse|icse|matric|xii|10th|12th|graduat|"
@@ -157,9 +160,23 @@ _EXPLICIT_PATTERNS = [
 _EXPLICIT_MONTHS = re.compile(r"(\d{1,2})\s*(?:months?|mos?)\s*(?:of\s+)?(?:[a-z\-/&]+\s+){0,3}?experience")
 
 
+# Per-screening-run override ("resumes received on"), set by the worker for the file it is analysing.
+_REFERENCE_OVERRIDE: ContextVar[Optional[datetime]] = ContextVar("ats_reference_date", default=None)
+
+
 def reference_date() -> datetime:
-    """'Present'/'current' in a resume means this date (today unless ATS_REFERENCE_DATE is set)."""
-    return config.REFERENCE_DATE or datetime.now()
+    """'Present'/'current' in a resume means this date: the run's reference date if given, else
+    ATS_REFERENCE_DATE, else today."""
+    return _REFERENCE_OVERRIDE.get() or config.REFERENCE_DATE or datetime.now()
+
+
+@contextmanager
+def using_reference_date(value: Optional[datetime]):
+    token = _REFERENCE_OVERRIDE.set(value)
+    try:
+        yield
+    finally:
+        _REFERENCE_OVERRIDE.reset(token)
 
 
 def _parse_date(token: str, is_end: bool) -> Optional[datetime]:
@@ -282,11 +299,17 @@ def employment_ranges(text: str) -> List[Tuple[datetime, datetime]]:
             continue
         if _ACTIVITY_LINE.search(line) and not _EMPLOYER_WORDS.search(line):
             continue  # "Alumni Committee Coordinator, Regional Institute (Dec 2021 - May 2023)": student activity
+        if (_YEAR_ONLY.fullmatch(start_raw) and _YEAR_ONLY.fullmatch(end_raw or "") and not _JOB_LINE.search(line)
+                and _EDU_LINE.search(" ".join(l for _, l in lines[max(0, idx - 2): idx + 3]))):
+            continue  # a bare "2016 - 2020" within two lines of a degree, college or CGPA is the course, not a job
         if section not in _EMPLOYMENT_SECTIONS:
             # Headings are sometimes mis-detected (two-column PDFs); keep a range outside an employment
             # section only when its own line (or neighbours, for 'other') clearly describe a job.
             if section == "education":
-                evidence = line
+                # The title/employer often sits on the 1-2 lines above the dates; nothing next to them may be education.
+                evidence = " ".join([line, *(l for _, l in lines[max(0, idx - 2): idx])])
+                if not _JOB_LINE.search(evidence) or _EDU_LINE.search(neighbourhood):
+                    continue
             else:  # the employer/title usually sits on the 1-3 lines above the dates
                 evidence = " ".join([neighbourhood, *(l for _, l in lines[max(0, idx - 3): idx])])
             if not _JOB_LINE.search(evidence) or _EDU_LINE.search(line):
@@ -357,9 +380,10 @@ def per_job_durations(text: str) -> float:
 
 def extract_experience(text: str) -> float:
     """Total professional experience in years (overlaps merged, education/projects/internships excluded)."""
-    # GPA-like tokens ("7.77/10", "cgpa: 8.1") are removed first so they are never read as years.
-    clean = re.sub(r"\b(?:c?gpa|cumulative\s+gpa|cumulative\s+grade|grade)\b[:\s\-]*[\d.]+(?:\s*(?:out\s+of|/)\s*[\d.]+)?",
-                   " ", text)
+    # GPA values ("7.77/10", "cgpa: 8.1") are removed first so they are never read as years. The word itself
+    # stays: it marks "2016 - 2020" on the neighbouring line as a degree, not a job.
+    clean = re.sub(r"\b(c?gpa|cumulative\s+gpa|cumulative\s+grade|grade)\b[:\s\-]*[\d.]+(?:\s*(?:out\s+of|/)\s*[\d.]+)?",
+                   r" \1 ", text)
     clean = re.sub(r"\b\d{1,2}\.\d{1,2}\s*/\s*10\b", " ", clean)
     from_ranges = sum((end - start).days / 365.25 for start, end in _merge_ranges(employment_ranges(clean)))
     explicit = explicit_experience(clean)

@@ -172,6 +172,48 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/progress/nope").status_code, 404)
 
 
+class ReferenceDateApiTests(unittest.TestCase):
+    """reference_date: per-run date that "present" in resumes is counted to."""
+
+    RESUME = ("Kai Example\nBackend Engineer\nTechnical Skills\nPython, SQL, Docker\nWork Experience\n"
+              "Backend Engineer, Demo Systems Pvt Ltd\nJan 2020 - Present\nEducation\nB.Tech Computer Science, 2019\n")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(app, raise_server_exceptions=False)
+        cls.client.__enter__()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.client.__exit__(None, None, None)
+
+    def result(self, route, **extra):
+        if route == "/api/single":
+            files = {"resume": ("kai.txt", self.RESUME.encode(), "text/plain")}
+        else:
+            files = [upload("kai.txt", self.RESUME)]
+        r = self.client.post(route, data={**JOB, **extra}, files=files, headers=HEADERS)
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        return body if route == "/api/single" else body["all_results"][0]
+
+    def test_reference_date_sets_present_for_the_run(self):
+        for route in ("/api/single", "/api/bulk"):
+            with self.subTest(route=route):
+                res = self.result(route, reference_date="2025-01-01")
+                self.assertAlmostEqual(res["experience_years"], 5.0, delta=0.05)
+                self.assertIn("'present' counted to 2025-01-01", res["explanation"])
+                self.assertGreater(self.result(route)["experience_years"], 6.5)  # default: today
+
+    def test_reference_date_validation(self):
+        for bad in ("2025-13-01", "01/01/2025", "yesterday", "1980-01-01", "2999-01-01"):
+            with self.subTest(value=bad):
+                r = self.client.post("/api/bulk", data={**JOB, "reference_date": bad},
+                                     files=[upload("kai.txt", self.RESUME)], headers=HEADERS)
+                self.assertEqual(r.status_code, 422)
+                self.assertIn("reference_date", r.json()["detail"])
+
+
 class FailureLogPrivacyTests(unittest.TestCase):
     """With ATS_SAVE_RESULTS=0 nothing on disk names the candidate; the API still reports every failure."""
 

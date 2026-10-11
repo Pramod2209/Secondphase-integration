@@ -229,7 +229,7 @@ All are optional. Booleans accept `1/true/yes/on`; anything else is false.
 | `ATS_MAX_CONCURRENT_JOBS` | `1` | Screening requests processed at the same time; others wait. |
 | `ATS_ALLOWED_FOLDER_ROOTS` | empty (disabled) | Directories `/api/bulk-parallel-folder` may read, separated by `os.pathsep` (`;` on Windows). |
 | `ATS_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated browser origins allowed to call the API. |
-| `ATS_REFERENCE_DATE` | today | `YYYY-MM-DD`; what "present" means when computing experience. Use it when re-screening old resumes. |
+| `ATS_REFERENCE_DATE` | today | `YYYY-MM-DD`; what "present" means when computing experience, unless a request sends its own `reference_date`. Use it when re-screening old resumes. |
 | `VITE_API_BASE` (UI build/dev) | `http://127.0.0.1:8000` | API base URL used by the React UI. |
 
 Fixed in code (not environment variables): score weights 0.40/0.30/0.20/0.10, category credit
@@ -242,7 +242,7 @@ Fixed in code (not environment variables): score weights 0.40/0.30/0.20/0.10, ca
 .venv\Scripts\python -m unittest discover -s tests -t .
 ```
 
-At handover: **150 tests, all passing** (about 30–170 s depending on machine load). Tests generate
+At handover: **156 tests, all passing** (about 30–170 s depending on machine load). Tests generate
 their own fixtures (PDF, scanned PDF, DOCX) and write runtime files to temporary folders. The
 OCR tests need Tesseract; the `.doc` tests need antiword. `tests/test_workers.py` checks that
 worker processes exit when the API process is killed.
@@ -310,6 +310,7 @@ POST is still open. The UI polls once per second.
 | `preferred_skills` | comma-separated string | same; a skill listed in both counts as required |
 | `min_experience_years` | number, default `0` | 0 to 50 |
 | `required_education` | `any` (default), `diploma`, `associate`, `bachelor`, `master`, `phd` | must be one of these |
+| `reference_date` | optional `YYYY-MM-DD` | between 1990-01-01 and today. "Present"/"till date" in resumes is counted up to this date for this request; empty = `ATS_REFERENCE_DATE` or today. Use the date the resumes were received. |
 
 At least one of title, description, required or preferred skills must be non-empty. Skill names
 are normalised to the taxonomy's canonical names (e.g. `k8s` → `kubernetes`); the response uses
@@ -811,7 +812,11 @@ Set `ATS_PREFILTER=0` to rank every readable resume.
 - Extraction is rule-based: unusual layouts and two-column PDFs can hide or misplace experience
   dates and degrees; extracted names can be wrong (a heading phrase or the file name).
 - Only the first 12 PDF pages and 4 OCR pages are read; OCR quality depends on the scan.
-- "Present" means today unless `ATS_REFERENCE_DATE` is set.
+- "Present" means today unless the request's `reference_date` (UI: "Resumes received on") or
+  `ATS_REFERENCE_DATE` is set. Screening old resumes without it overstates experience: on the
+  development set the median error was 1.7 years with "today" and 0.25 years with the download date.
+- Experience is read from date ranges by rules. Degree years with no education words nearby can still
+  be counted, and jobs whose dates the layout separates from any title or employer can be missed.
 
 ### 7.6 Why human review is needed
 
@@ -888,7 +893,7 @@ These phases are **recommendations**. Only Phase A is supported by the current c
 
 - Prerequisites: Python 3.13, Node 22, optional Tesseract/antiword; repository cloned.
 - Deliverables: Bulk ATS running locally via the launcher; team familiar with the API and UI.
-- Acceptance: 150 tests pass; `/api/health` OK; a synthetic bulk run returns
+- Acceptance: 156 tests pass; `/api/health` OK; a synthetic bulk run returns
   `submitted = processed + filtered + failed`; API and UI listen only on 127.0.0.1.
 
 ### Phase B — shared website integration with an API boundary
@@ -950,7 +955,7 @@ These phases are **recommendations**. Only Phase A is supported by the current c
 
 - [ ] `.venv` created and `pip install -r ats\requirements.txt` succeeded.
 - [ ] `npm install` in `webui/` succeeded; `npm run build` succeeds.
-- [ ] `.venv\Scripts\python -m unittest discover -s tests -t .` → 150 tests OK.
+- [ ] `.venv\Scripts\python -m unittest discover -s tests -t .` → 156 tests OK.
 - [ ] `start_ats_stack.bat` starts API and UI; `GET http://127.0.0.1:8000/api/health` returns `"status": "ok"`.
 - [ ] `netstat -ano | findstr LISTENING` shows ports 8000 and 5173 on `127.0.0.1` only.
 - [ ] A bulk run with synthetic PDF, DOCX and an unsupported file shows ranked, filtered and failed

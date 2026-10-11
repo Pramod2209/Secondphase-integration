@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 // Sent with every POST; the API rejects requests without it (blocks cross-site form posts).
@@ -14,6 +14,7 @@ const defaultJob = {
   preferred_skills: "redis,linux,terraform,kafka",
   min_experience_years: "3",
   required_education: "bachelor",
+  reference_date: "", // empty = "present" in resumes means today
 };
 
 function buildForm(job, extra = {}) {
@@ -107,7 +108,31 @@ function JobForm({ job, setJob, prefix }) {
           onChange={(e) => setJob({ ...job, min_experience_years: e.target.value })}
         />
       </label>
+      <label>
+        Resumes received on (optional)
+        <input
+          type="date"
+          max={new Date().toISOString().slice(0, 10)}
+          value={job.reference_date}
+          onChange={(e) => setJob({ ...job, reference_date: e.target.value })}
+        />
+        <small className="hint">"Present" / "till date" in resumes is counted up to this date. Empty = today.</small>
+      </label>
       <div className="badge">{prefix} mode</div>
+    </div>
+  );
+}
+
+function ScoreCell({ s }) {
+  if (!s) return null;
+  return (
+    <div className="score-cell">
+      <strong>{Number(s.final).toFixed(1)}</strong>
+      <small>
+        skills {s.skills} · exp {s.experience}
+        <br />
+        sem {s.semantic} · edu {s.education}
+      </small>
     </div>
   );
 }
@@ -132,6 +157,7 @@ export default function App() {
   const [topN, setTopN] = useState(10);
   const [singleResult, setSingleResult] = useState(null);
   const [bulkResult, setBulkResult] = useState(null);
+  const [openWhy, setOpenWhy] = useState(() => new Set()); // candidate_ids whose explanation is shown
   const [loadingSingle, setLoadingSingle] = useState(false);
   const [loadingBulk, setLoadingBulk] = useState(false);
   const [error, setError] = useState("");
@@ -248,7 +274,11 @@ export default function App() {
           <JobForm job={singleJob} setJob={setSingleJob} prefix="single" />
           <label className="upload">
             Resume (.pdf .docx .doc .txt)
-            <input type="file" accept=".pdf,.docx,.doc,.txt" onChange={(e) => setSingleFile(e.target.files?.[0] || null)} />
+            <input
+              type="file"
+              accept=".pdf,.docx,.doc,.txt"
+              onChange={(e) => setSingleFile(e.target.files?.[0] || null)}
+            />
           </label>
           <button onClick={runSingle} disabled={loadingSingle}>
             {loadingSingle ? "Running..." : "Run Single"}
@@ -309,90 +339,115 @@ export default function App() {
           <button onClick={runBulk} disabled={loadingBulk}>
             {loadingBulk ? "Running..." : "Run Bulk"}
           </button>
+        </SectionCard>
+      </div>
 
-          {bulkResult && (
-            <div className="result">
-              <h3>Summary</h3>
-              <p>
-                submitted {bulkResult.total_submitted} | ranked {bulkResult.total_processed} | filtered (no required or
-                preferred skill found) {bulkResult.total_filtered} | failed {bulkResult.total_failed}
-              </p>
-              <p>
-                <strong>Total time:</strong> {formatSeconds(bulkResult.total_time_taken_seconds)} ·{" "}
-                <strong>Average score:</strong> {bulkResult.avg_score.toFixed(1)} · <strong>Semantic scoring:</strong>{" "}
-                {bulkResult.semantic_enabled ? "on" : "off"} · {bulkResult.batches} request(s)
-              </p>
-              {bulkResult.warnings.map((w) => (
-                <p key={w} className="warning">
-                  {w}
-                </p>
-              ))}
-              <table>
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Name</th>
-                    <th>File</th>
-                    <th>Score</th>
-                    <th>Exp (yrs)</th>
-                    <th>Education</th>
-                    <th>Matched skills</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bulkResult.top_candidates.map((r) => (
-                    <tr key={r.candidate_id}>
+      {bulkResult && (
+        <section className="card results">
+          <h2>Bulk results</h2>
+          <p>
+            submitted {bulkResult.total_submitted} | ranked {bulkResult.total_processed} | filtered (no required or
+            preferred skill found) {bulkResult.total_filtered} | failed {bulkResult.total_failed}
+          </p>
+          <p>
+            <strong>Total time:</strong> {formatSeconds(bulkResult.total_time_taken_seconds)} ·{" "}
+            <strong>Average score:</strong> {bulkResult.avg_score.toFixed(1)} · <strong>Semantic scoring:</strong>{" "}
+            {bulkResult.semantic_enabled ? "on" : "off"} · {bulkResult.batches} request(s)
+          </p>
+          {bulkResult.warnings.map((w) => (
+            <p key={w} className="warning">
+              {w}
+            </p>
+          ))}
+          <div className="table-wrap">
+            <table className="ranked">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Name</th>
+                  <th>File</th>
+                  <th>Score</th>
+                  <th>Exp (yrs)</th>
+                  <th>Education</th>
+                  <th>Matched skills</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bulkResult.top_candidates.map((r) => (
+                  <Fragment key={r.candidate_id}>
+                    <tr>
                       <td>{r.rank}</td>
                       <td>{r.name}</td>
-                      <td>
+                      <td className="file">
                         {r.file_path}
                         {r.duplicate_of ? ` (duplicate of ${r.duplicate_of})` : ""}
                       </td>
                       <td>
-                        <Scores s={r.scores} />
+                        <ScoreCell s={r.scores} />
                       </td>
                       <td>{r.experience_years}</td>
                       <td>{r.education_level}</td>
                       <td>
                         {(r.matched_skills || []).join(", ")}
-                        <details>
-                          <summary>why</summary>
-                          <pre>{r.explanation}</pre>
-                        </details>
+                        <div>
+                          <button
+                            type="button"
+                            className="why-toggle"
+                            aria-expanded={openWhy.has(r.candidate_id)}
+                            onClick={() =>
+                              setOpenWhy((prev) => {
+                                const next = new Set(prev);
+                                next.has(r.candidate_id) ? next.delete(r.candidate_id) : next.add(r.candidate_id);
+                                return next;
+                              })
+                            }
+                          >
+                            {openWhy.has(r.candidate_id) ? "▾ hide why" : "▸ why"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              {bulkResult.failed_files.length > 0 && (
-                <>
-                  <h3>Files not processed ({bulkResult.failed_files.length})</h3>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>File</th>
-                        <th>Reason</th>
+                    {openWhy.has(r.candidate_id) && (
+                      <tr className="why-row">
+                        <td colSpan={7}>
+                          <pre>{r.explanation}</pre>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {bulkResult.failed_files.map((f) => (
-                        <tr key={f.candidate_id}>
-                          <td>{f.file_path}</td>
-                          <td>{f.error_message}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </>
-              )}
-              <details>
-                <summary>Raw JSON</summary>
-                <pre>{JSON.stringify(bulkResult, null, 2)}</pre>
-              </details>
-            </div>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {bulkResult.failed_files.length > 0 && (
+            <>
+              <h3>Files not processed ({bulkResult.failed_files.length})</h3>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>File</th>
+                      <th>Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bulkResult.failed_files.map((f) => (
+                      <tr key={f.candidate_id}>
+                        <td className="file">{f.file_path}</td>
+                        <td>{f.error_message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
-        </SectionCard>
-      </div>
+          <details>
+            <summary>Raw JSON</summary>
+            <pre>{JSON.stringify(bulkResult, null, 2)}</pre>
+          </details>
+        </section>
+      )}
     </main>
   );
 }

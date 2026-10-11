@@ -7,7 +7,7 @@ from datetime import datetime
 from unittest import mock
 
 from ats import config
-from ats.extractor import extract_experience, reference_date
+from ats.extractor import extract_experience, reference_date, using_reference_date
 from ats.parser import normalize_text
 
 
@@ -37,6 +37,14 @@ class ReferenceDateTests(unittest.TestCase):
     def test_dates_after_reference_are_clipped(self):
         with mock.patch.object(config, "REFERENCE_DATE", datetime(2019, 1, 1)):
             self.assertEqual(exp(OPEN_JOB), 0.0)  # job starts after the reference date
+
+    def test_per_run_date_overrides_setting_and_is_restored(self):
+        with mock.patch.object(config, "REFERENCE_DATE", datetime(2019, 1, 1)):
+            with using_reference_date(datetime(2025, 1, 1)):
+                self.assertAlmostEqual(exp(OPEN_JOB), 5.0, places=1)
+            self.assertEqual(exp(OPEN_JOB), 0.0)  # back to the configured date
+        with using_reference_date(None):  # no per-run date: configured date / today
+            self.assertLess(abs((reference_date() - datetime.now()).total_seconds()), 5)
 
     def test_env_parsing(self):
         with mock.patch.dict(os.environ, {"ATS_REFERENCE_DATE": "2024-06-30"}):
