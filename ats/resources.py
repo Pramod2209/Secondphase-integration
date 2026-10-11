@@ -3,92 +3,48 @@ from __future__ import annotations
 import os
 
 import psutil
-from rich.console import Console
-from rich.table import Table
 
 from .schema import SystemResources
 
+# Approximate resident memory of one parser worker process (pdfminer + python-docx, no torch).
+_PARSE_WORKER_MB = 120
+_RESERVED_MB = 900  # main process incl. MiniLM model + headroom
+
+
+def _env_int(*names: str) -> int | None:
+    for name in names:
+        value = os.environ.get(name)
+        if value and value.strip():
+            try:
+                return max(1, int(value))
+            except ValueError:
+                pass
+    return None
+
 
 def detect_and_tune() -> SystemResources:
+    """Pick worker counts from CPU and free RAM. Parsing (pure-Python pdfminer) is the bottleneck, so it
+    runs in separate processes; embeddings run in the main process using torch's own threads."""
     cpu_cores = max(os.cpu_count() or 1, 1)
     available_ram_gb = psutil.virtual_memory().available / (1024 ** 3)
 
-    # Low-RAM systems should prioritize fewer workers to avoid memory pressure.
-    if available_ram_gb < 4:
-        default_thread_workers = min(max(cpu_cores, 8), 24)
-        default_process_workers = 2
-    elif available_ram_gb < 8:
-        default_thread_workers = min(max(cpu_cores, 12), 32)
-        default_process_workers = min(max(cpu_cores // 4, 2), 4)
-    else:
-        default_thread_workers = min(cpu_cores * 2, 64)
-        default_process_workers = min(max(cpu_cores // 2, 2), 12)
+    by_ram = int((available_ram_gb * 1024 - _RESERVED_MB) // _PARSE_WORKER_MB)
+    default_workers = max(1, min(cpu_cores - 1, 16, by_ram))
+    parse_workers = _env_int("ATS_PARSE_WORKERS", "ATS_PROCESS_WORKERS") or default_workers
 
-    # Allow environment overrides for experimentation and tuning
-    thread_workers = int(os.environ.get("ATS_THREAD_WORKERS", default_thread_workers))
-    process_workers = int(os.environ.get("ATS_PROCESS_WORKERS", default_process_workers))
+    embedding_batch_size = _env_int("ATS_EMBEDDING_BATCH_SIZE") or 32
+    embedding_threads = _env_int("ATS_EMBEDDING_THREADS") or max(1, min(8, cpu_cores - parse_workers, cpu_cores // 2))
 
-    # Aggressive embedding batch sizes when RAM is available; fall back for low-memory systems
-    if os.environ.get("ATS_EMBEDDING_BATCH_SIZE"):
-        embedding_batch_size = int(os.environ.get("ATS_EMBEDDING_BATCH_SIZE"))
-    else:
-        if available_ram_gb >= 32:
-            embedding_batch_size = 256
-        elif available_ram_gb >= 16:
-            embedding_batch_size = 128
-        elif available_ram_gb >= 8:
-            embedding_batch_size = 64
-        elif available_ram_gb >= 4:
-            embedding_batch_size = 32
-        else:
-            embedding_batch_size = 16
-
-    # Larger batch sizes on many cores; keep moderate defaults for low RAM.
-    if os.environ.get("ATS_BATCH_SIZE"):
-        batch_size = int(os.environ.get("ATS_BATCH_SIZE"))
-    else:
-        if available_ram_gb < 4:
-            batch_size = 120
-        elif cpu_cores >= 32:
-            batch_size = 300
-        elif cpu_cores >= 16:
-            batch_size = 200
-        elif cpu_cores >= 8:
-            batch_size = 150
-        elif cpu_cores >= 4:
-            batch_size = 100
-        else:
-            batch_size = 50
-
-    # Number of batches to run concurrently. Higher on many-core machines but bounded.
-    if os.environ.get("ATS_MAX_CONCURRENT_BATCHES"):
-        max_concurrent_batches = int(os.environ.get("ATS_MAX_CONCURRENT_BATCHES"))
-    else:
-        max_concurrent_batches = min(max(cpu_cores // 3, 2), 12)
-        # if RAM is very low, be conservative
-        if available_ram_gb < 4:
-            max_concurrent_batches = min(max_concurrent_batches, 4)
-
-    tuned = SystemResources(
+    return SystemResources(
         cpu_cores=cpu_cores,
         available_ram_gb=round(available_ram_gb, 2),
-        batch_size=batch_size,
-        max_concurrent_batches=max_concurrent_batches,
-        thread_workers=thread_workers,
-        process_workers=process_workers,
+        parse_workers=parse_workers,
         embedding_batch_size=embedding_batch_size,
+        embedding_threads=embedding_threads,
     )
 
-    table = Table(title="System Resources Detected")
-    table.add_column("Metric")
-    table.add_column("Value", justify="right")
-    table.add_row("CPU Cores", str(tuned.cpu_cores))
-    table.add_row("Available RAM (GB)", f"{tuned.available_ram_gb:.2f}")
-    table.add_row("Batch Size", str(tuned.batch_size))
-    table.add_row("Max Concurrent Batches", str(tuned.max_concurrent_batches))
-    table.add_row("Thread Workers", str(tuned.thread_workers))
-    table.add_row("Process Workers", str(tuned.process_workers))
-    table.add_row("Embedding Batch Size", str(tuned.embedding_batch_size))
-    Console().print(table)
 
-    return tuned
+def describe(resources: SystemResources) -> str:
+    return (f"cpu={resources.cpu_cores} free_ram={resources.available_ram_gb:.1f}GB "
+            f"parse_workers={resources.parse_workers} embed_batch={resources.embedding_batch_size} "
+            f"embed_threads={resources.embedding_threads}")

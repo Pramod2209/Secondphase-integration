@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from ats.api import build_job_profile, screen_bulk
+from ats.orchestrator import render_bulk_summary
 
 async def run(folder_path: str, top_n: int = 10):
     folder = Path(folder_path)
@@ -32,8 +33,10 @@ async def run(folder_path: str, top_n: int = 10):
     output = await screen_bulk(str(folder), job, top_n=top_n)
     end = datetime.now()
     dur = (end - start).total_seconds()
+    render_bulk_summary(output)
     print(f"Benchmark completed: {dur:.2f}s")
-    print(f"Submitted: {output.total_submitted}, Processed: {output.total_processed}, Failed: {output.total_failed}")
+    print(f"Submitted: {output.total_submitted}, Processed: {output.total_processed}, "
+          f"Filtered: {output.total_filtered}, Failed: {output.total_failed}")
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:

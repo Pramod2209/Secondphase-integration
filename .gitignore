@@ -11,3 +11,10 @@ ats/output/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+ats/runs/
+
+# Generated / private data: never commit (may contain candidate PII)
+*.log
+accuracy_test_all_results.json
+scripts/manual/*.json
+*.jsonl

@@ -1,3 +1,5 @@
+> **HISTORICAL (April 2026).** Measured on an older version of the scoring pipeline (education regex false positives, no OCR, old prefilter). Not representative of current behaviour; see README.md.
+
 # ATS SYSTEM ACCURACY ASSESSMENT
 
 ## Key Findings

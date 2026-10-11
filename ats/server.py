@@ -1,71 +1,105 @@
+"""HTTP API for the screening pipeline (FastAPI).
+
+Endpoints
+  GET  /api/health                  liveness + capabilities (OCR, .doc support, semantic)
+  POST /api/single                  score one uploaded resume
+  POST /api/bulk                    score up to ATS_MAX_FILES_PER_REQUEST uploaded resumes
+  GET  /api/progress/{request_id}   progress of a running /api/bulk request (client-supplied id)
+  POST /api/bulk-parallel-folder    score a folder on this machine; disabled unless
+                                    ATS_ALLOWED_FOLDER_ROOTS lists the permitted directories
+
+All POST endpoints require the header "X-ATS-Client" (any value). Browsers cannot send custom
+headers cross-origin without a CORS preflight, which is only allowed for the configured UI
+origins, so other websites cannot trigger screening runs on this machine.
+"""
 from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
 import tempfile
-import time
+from contextlib import asynccontextmanager
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional, Tuple
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-import logging
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+import logging
 
 from . import config
-from .api import build_job_profile, screen_bulk, screen_single
-from .embedder import Embedder
-from .extractor import load_taxonomy
-from .resources import detect_and_tune
+from .api import JobValidationError, build_job_profile, list_resume_files, screen_files, screen_single
+from .logger import get_logger
+from .orchestrator import get_progress
+from .parser import _antiword_path, ocr_available
+from .resources import describe, detect_and_tune
+from .skills import load_taxonomy_index
 
-app = FastAPI(title="ATS API", version="1.0.0")
+logger = get_logger(__name__)
+CLIENT_HEADER = "x-ats-client"
+_CHUNK = 1024 * 1024
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    load_taxonomy_index()
+    for name in ("pdfminer", "pdfminer.high_level", "PIL"):
+        logging.getLogger(name).setLevel(logging.ERROR)
+    resources = detect_and_tune()
+    logger.info("ATS API starting: %s ocr=%s doc=%s", describe(resources), ocr_available(), bool(_antiword_path()))
+    loop = asyncio.get_running_loop()
+    if config.WARMUP_PARSE_POOL:
+        from .orchestrator import warm_pool
+
+        started = await loop.run_in_executor(None, warm_pool, resources.parse_workers)
+        logger.info("Parser workers ready: %s", started)
+    if config.WARMUP_EMBEDDER:
+        from .embedder import Embedder, EmbeddingUnavailable
+
+        try:
+            await loop.run_in_executor(None, Embedder.get_model)
+        except EmbeddingUnavailable as exc:
+            logger.warning("Embedder warmup failed: %s", exc)
+    yield
+
+
+app = FastAPI(title="ATS API", version="2.1.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def guard_requests(request: Request, call_next):
+    if request.method == "POST":
+        if CLIENT_HEADER not in request.headers:
+            return JSONResponse(status_code=403, content={"detail": "Missing X-ATS-Client header."})
+        length = request.headers.get("content-length")
+        if length and length.isdigit() and int(length) > config.MAX_REQUEST_SIZE_MB * 1024 * 1024:
+            return JSONResponse(status_code=413,
+                                content={"detail": f"Request too large (max {config.MAX_REQUEST_SIZE_MB} MB)."})
+    return await call_next(request)
+
+
+# Added after the guard so CORS is the outermost layer (error responses still carry CORS headers).
+_origins = [o.strip() for o in os.environ.get("ATS_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+            if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
-# Middleware to increase upload size limit to 5GB
-class MaxUploadSizeMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, max_upload_size: int):
-        super().__init__(app)
-        self.max_upload_size = max_upload_size
 
-    async def dispatch(self, request, call_next):
-        if request.method == 'POST':
-            if 'content-length' in request.headers:
-                content_length = int(request.headers['content-length'])
-                if content_length > self.max_upload_size:
-                    return JSONResponse(
-                        status_code=413,
-                        content={"detail": f"File too large. Max size: {self.max_upload_size / (1024**3):.1f}GB"}
-                    )
-        return await call_next(request)
-
-app.add_middleware(MaxUploadSizeMiddleware, max_upload_size=5 * 1024 * 1024 * 1024)
+_job_semaphore: Optional[asyncio.Semaphore] = None
 
 
-@app.on_event("startup")
-async def warmup() -> None:
-    resources = detect_and_tune()
-    load_taxonomy()
-    if config.WARMUP_EMBEDDER:
-        embedder = Embedder(batch_size=resources.embedding_batch_size)
-        embedder.encode_single("warmup text")
-    # Suppress noisy PDF/font warnings from third-party libs when possible
-    logging.getLogger("pdfminer").setLevel(logging.ERROR)
-    logging.getLogger("pdfminer.high_level").setLevel(logging.ERROR)
-    logging.getLogger("PIL").setLevel(logging.ERROR)
-    logging.getLogger("reportlab").setLevel(logging.ERROR)
-
-
-def _split_csv(value: str) -> List[str]:
-    return [item.strip().lower() for item in (value or "").split(",") if item.strip()]
+def _semaphore() -> asyncio.Semaphore:
+    global _job_semaphore
+    if _job_semaphore is None:
+        _job_semaphore = asyncio.Semaphore(config.MAX_CONCURRENT_JOBS)
+    return _job_semaphore
 
 
 def _json_default(value: Any) -> Any:
@@ -80,397 +114,208 @@ def _to_jsonable(value: Any) -> Any:
     return json.loads(json.dumps(value, default=_json_default))
 
 
+def safe_display_name(filename: Optional[str]) -> str:
+    """Basename of a client-supplied filename with path components and control characters removed."""
+    name = re.split(r"[\\/]", filename or "")[-1]
+    name = re.sub(r"[\x00-\x1f\x7f]", "", name).strip().strip(".")
+    return name[:200] or "unnamed"
+
+
+def _job_from_form(title: str, description: str, required_skills: str, preferred_skills: str,
+                   min_experience_years: str, required_education: str):
+    try:
+        return build_job_profile(title=title, description=description, required_skills=required_skills,
+                                 preferred_skills=preferred_skills, min_experience_years=min_experience_years,
+                                 required_education=required_education)
+    except JobValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _validate_top_n(top_n: str) -> int:
+    try:
+        value = int(str(top_n).strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="top_n must be a whole number.") from exc
+    if not 1 <= value <= 100000:
+        raise HTTPException(status_code=422, detail="top_n must be between 1 and 100000.")
+    return value
+
+
+async def _save_upload(upload: UploadFile, target: Path) -> Tuple[bool, int]:
+    """Stream an upload to disk. Returns (within_size_limit, bytes_written)."""
+    limit = config.MAX_FILE_SIZE_MB * 1024 * 1024
+    written = 0
+    with open(target, "wb") as fh:
+        while True:
+            chunk = await upload.read(_CHUNK)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > limit:
+                break
+            fh.write(chunk)
+    if written > limit:
+        target.unlink(missing_ok=True)
+        return False, written
+    return True, written
+
+
+async def _store_uploads(uploads: List[UploadFile], temp_dir: Path):
+    """Save uploads under generated names (never the client's path). Returns (files, rejected)."""
+    from .orchestrator import _build_result
+    from .worker import FileAnalysis
+
+    files: List[Tuple[str, str]] = []
+    rejected = []
+    seen: dict[str, int] = {}
+    for index, upload in enumerate(uploads):
+        display = safe_display_name(upload.filename)
+        seen[display.lower()] = seen.get(display.lower(), 0) + 1
+        if seen[display.lower()] > 1:  # same name uploaded twice: keep both, label the copies
+            display = f"{display} [{seen[display.lower()]}]"
+        suffix = Path(safe_display_name(upload.filename)).suffix.lower()[:10]
+        target = temp_dir / f"{index:05d}{suffix if re.fullmatch(r'\.[a-z0-9]+', suffix or '') else ''}"
+        ok, size = await _save_upload(upload, target)
+        if ok:
+            files.append((str(target), display))
+        else:
+            analysis = FileAnalysis(index=index, display_path=display, file_name=display, ok=False,
+                                    error=f"file_too_large: exceeds {config.MAX_FILE_SIZE_MB} MB limit")
+            rejected.append(_build_result(analysis, "failed", None, None, None, False, 0.0))  # type: ignore[arg-type]
+    return files, rejected
+
+
+def _bulk_response(output) -> dict:
+    data = _to_jsonable(asdict(output))
+    data["execution_summary"] = {
+        "duration_seconds": round(output.time_taken_seconds, 2),
+        "total_submitted": output.total_submitted,
+        "total_processed": output.total_processed,
+        "total_filtered": output.total_filtered,
+        "total_failed": output.total_failed,
+        "throughput_resumes_per_second": round(output.throughput_per_second, 2),
+        "semantic_enabled": bool(output.summary_stats.get("semantic_enabled", False)),
+    }
+    return data
+
+
 @app.get("/api/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "ocr_available": ocr_available(),
+        "doc_supported": bool(_antiword_path()),
+        "semantic_bulk": config.USE_SEMANTIC_EMBEDDING_BULK,
+        "prefilter": config.PREFILTER_ENABLED,
+        "max_files_per_request": config.MAX_FILES_PER_REQUEST,
+        "max_file_size_mb": config.MAX_FILE_SIZE_MB,
+        "folder_screening_enabled": bool(config.ALLOWED_FOLDER_ROOTS),
+    }
+
+
+@app.get("/api/progress/{request_id}")
+async def progress(request_id: str) -> dict[str, Any]:
+    entry = get_progress(request_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Unknown request id")
+    return entry
 
 
 @app.post("/api/single")
 async def single_screen(
     resume: UploadFile = File(...),
-    title: str = Form(...),
-    description: str = Form(...),
+    title: str = Form(""),
+    description: str = Form(""),
     required_skills: str = Form(""),
     preferred_skills: str = Form(""),
-    min_experience_years: float = Form(0.0),
+    min_experience_years: str = Form("0"),
     required_education: str = Form("any"),
+    debug: bool = Form(False),
 ) -> Any:
     if not resume.filename:
         raise HTTPException(status_code=400, detail="No resume provided")
-
-    with tempfile.TemporaryDirectory(prefix="ats_single_api_") as temp_dir:
-        temp_path = Path(temp_dir)
-        resume_path = temp_path / resume.filename
-        resume_path.write_bytes(await resume.read())
-
-        job = build_job_profile(
-            title=title,
-            description=description,
-            required_skills=_split_csv(required_skills),
-            preferred_skills=_split_csv(preferred_skills),
-            min_experience_years=float(min_experience_years),
-            required_education=required_education,
-        )
-
-        output = await screen_single(
-            resume_path=str(resume_path),
-            job=job,
-        )
-        return _to_jsonable(asdict(output))
+    job = _job_from_form(title, description, required_skills, preferred_skills, min_experience_years,
+                         required_education)
+    display = safe_display_name(resume.filename)
+    async with _semaphore():
+        with tempfile.TemporaryDirectory(prefix="ats_single_api_") as temp_dir:
+            suffix = Path(display).suffix.lower()
+            target = Path(temp_dir) / f"resume{suffix if re.fullmatch(r'\.[a-z0-9]+', suffix or '') else ''}"
+            ok, _ = await _save_upload(resume, target)
+            if not ok:
+                raise HTTPException(status_code=413, detail=f"File exceeds {config.MAX_FILE_SIZE_MB} MB limit")
+            output = await screen_single(resume_path=str(target), job=job, debug=debug, display_path=display)
+    return _to_jsonable(asdict(output))
 
 
 @app.post("/api/bulk")
 async def bulk_screen(
     resumes: List[UploadFile] = File(...),
-    title: str = Form(...),
-    description: str = Form(...),
+    title: str = Form(""),
+    description: str = Form(""),
     required_skills: str = Form(""),
     preferred_skills: str = Form(""),
-    min_experience_years: float = Form(0.0),
+    min_experience_years: str = Form("0"),
     required_education: str = Form("any"),
-    top_n: int = Form(10),
+    top_n: str = Form("10"),
+    request_id: str = Form(""),
 ) -> Any:
     if not resumes:
         raise HTTPException(status_code=400, detail="No resumes provided")
-
-    with tempfile.TemporaryDirectory(prefix="ats_bulk_api_") as temp_dir:
-        temp_path = Path(temp_dir)
-        for upload in resumes:
-            if upload.filename:
-                (temp_path / upload.filename).write_bytes(await upload.read())
-
-        job = build_job_profile(
-            title=title,
-            description=description,
-            required_skills=_split_csv(required_skills),
-            preferred_skills=_split_csv(preferred_skills),
-            min_experience_years=float(min_experience_years),
-            required_education=required_education,
-        )
-
-        output = await screen_bulk(
-            resume_folder=str(temp_path),
-            job=job,
-            top_n=int(top_n),
-            output_json_path=None,
-        )
-        response_data = _to_jsonable(asdict(output))
-        response_data["execution_summary"] = {
-            "duration_seconds": round(output.time_taken_seconds, 2),
-            "total_submitted": output.total_submitted,
-            "total_processed": output.total_processed,
-            "total_filtered": output.total_filtered,
-            "throughput_resumes_per_second": round(output.throughput_per_second, 2),
-            "semantic_enabled": bool(output.summary_stats.get("semantic_enabled", False)),
-        }
-        return response_data
+    if len(resumes) > config.MAX_FILES_PER_REQUEST:
+        raise HTTPException(status_code=413, detail=f"Too many files (max {config.MAX_FILES_PER_REQUEST} per request)")
+    job = _job_from_form(title, description, required_skills, preferred_skills, min_experience_years,
+                         required_education)
+    top = _validate_top_n(top_n)
+    key = request_id.strip()[:64] or None
+    async with _semaphore():
+        with tempfile.TemporaryDirectory(prefix="ats_bulk_api_") as temp_dir:
+            files, rejected = await _store_uploads(resumes, Path(temp_dir))
+            output = await screen_files(files, job, top_n=top, progress_key=key, extra_failures=rejected)
+    return _bulk_response(output)
 
 
-async def _process_batch_folder(
-    batch_folder: str,
-    job: Any,
-    top_n: int,
-    batch_id: int,
-) -> tuple[Any, float]:
-    """Process a single batch folder and return results with timing."""
-    batch_start = time.time()
-    output = await screen_bulk(
-        resume_folder=batch_folder,
-        job=job,
-        top_n=int(top_n),
-        output_json_path=None,
-    )
-    batch_duration = time.time() - batch_start
-    return output, batch_duration
-
-
-@app.post("/api/bulk-parallel")
-async def bulk_screen_parallel(
-    resumes: List[UploadFile] = File(...),
-    title: str = Form(...),
-    description: str = Form(...),
-    required_skills: str = Form(""),
-    preferred_skills: str = Form(""),
-    min_experience_years: float = Form(0.0),
-    required_education: str = Form("any"),
-    top_n: int = Form(10),
-) -> Any:
-    """
-    Process bulk resumes in parallel batches to optimize throughput.
-    Automatically splits large uploads into batches and processes concurrently.
-    """
-    if not resumes:
-        raise HTTPException(status_code=400, detail="No resumes provided")
-
-    overall_start = time.time()
-
-    with tempfile.TemporaryDirectory(prefix="ats_bulk_parallel_") as temp_dir:
-        temp_path = Path(temp_dir)
-        
-        # Write all uploaded files
-        for upload in resumes:
-            if upload.filename:
-                (temp_path / upload.filename).write_bytes(await upload.read())
-
-        # Get all resume files
-        resume_files = [
-            f for f in temp_path.glob("*")
-            if f.is_file() and f.suffix.lower() in {".pdf", ".docx", ".txt"}
-        ]
-        
-        total_files = len(resume_files)
-        
-        # Determine optimal batch size (max 500 files per batch)
-        batch_size = 500
-        num_batches = (total_files + batch_size - 1) // batch_size
-        
-        # Create batch folders
-        batch_folders = []
-        for batch_id in range(num_batches):
-            batch_folder = temp_path / f"batch_{batch_id}"
-            batch_folder.mkdir()
-            
-            start_idx = batch_id * batch_size
-            end_idx = min(start_idx + batch_size, total_files)
-            batch_files = resume_files[start_idx:end_idx]
-            
-            # Copy files to batch folder
-            import shutil
-            for file in batch_files:
-                shutil.copy2(file, batch_folder / file.name)
-            
-            batch_folders.append((batch_folder, batch_id, len(batch_files)))
-
-        # Build job profile
-        job = build_job_profile(
-            title=title,
-            description=description,
-            required_skills=_split_csv(required_skills),
-            preferred_skills=_split_csv(preferred_skills),
-            min_experience_years=float(min_experience_years),
-            required_education=required_education,
-        )
-
-        # Process all batches in parallel
-        batch_tasks = [
-            _process_batch_folder(str(batch_folder), job, top_n, batch_id)
-            for batch_folder, batch_id, _ in batch_folders
-        ]
-        batch_results = await asyncio.gather(*batch_tasks)
-
-        # Aggregate results
-        all_candidates = []
-        total_submitted = 0
-        total_processed = 0
-        total_filtered = 0
-        total_failed = 0
-        batch_timings = []
-
-        for idx, (output, duration) in enumerate(batch_results):
-            batch_size_actual = batch_folders[idx][2]
-            batch_timings.append({
-                "batch_id": idx,
-                "files_in_batch": batch_size_actual,
-                "duration_seconds": round(duration, 2),
-                "throughput": round(batch_size_actual / duration, 2) if duration > 0 else 0,
-            })
-            
-            total_submitted += output.total_submitted
-            total_processed += output.total_processed
-            total_filtered += output.total_filtered
-            total_failed += output.total_failed
-            
-            # Collect top candidates from each batch
-            all_candidates.extend(output.top_candidates)
-
-        # Sort all candidates by score and take top N
-        all_candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
-        top_candidates = all_candidates[:int(top_n)]
-
-        overall_duration = time.time() - overall_start
-        throughput = total_processed / overall_duration if overall_duration > 0 else 0
-
-        response_data = {
-            "total_submitted": total_submitted,
-            "total_processed": total_processed,
-            "total_filtered": total_filtered,
-            "total_failed": total_failed,
-            "top_candidates": _to_jsonable(top_candidates),
-            "execution_summary": {
-                "duration_seconds": round(overall_duration, 2),
-                "total_submitted": total_submitted,
-                "total_processed": total_processed,
-                "total_filtered": total_filtered,
-                "throughput_resumes_per_second": round(throughput, 2),
-                "batch_processing": {
-                    "num_batches": num_batches,
-                    "batch_size": batch_size,
-                    "batch_details": batch_timings,
-                    "parallelization": "Batches processed concurrently",
-                },
-            },
-        }
-        
-        return response_data
+def _folder_allowed(folder: Path) -> bool:
+    try:
+        resolved = folder.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return False
+    for root in config.ALLOWED_FOLDER_ROOTS:
+        try:
+            if resolved.is_relative_to(Path(root).resolve()):
+                return True
+        except (OSError, RuntimeError):
+            continue
+    return False
 
 
 @app.post("/api/bulk-parallel-folder")
-async def bulk_screen_parallel_folder(
+async def bulk_screen_folder(
     folder_path: str = Form(...),
-    title: str = Form(...),
-    description: str = Form(...),
+    title: str = Form(""),
+    description: str = Form(""),
     required_skills: str = Form(""),
     preferred_skills: str = Form(""),
-    min_experience_years: float = Form(0.0),
+    min_experience_years: str = Form("0"),
     required_education: str = Form("any"),
-    top_n: int = Form(10),
+    top_n: str = Form("10"),
+    request_id: str = Form(""),
 ) -> Any:
-    """
-    Process bulk resumes from a folder path in parallel batches.
-    Bypasses HTTP multipart limits by reading files directly from disk.
-    Perfect for processing 2000+ resume files efficiently.
-    """
-    import shutil
-    
+    """Screen a folder on this machine (no upload limits). Only folders inside ATS_ALLOWED_FOLDER_ROOTS."""
+    if not config.ALLOWED_FOLDER_ROOTS:
+        raise HTTPException(status_code=403, detail="Folder screening is disabled. Set ATS_ALLOWED_FOLDER_ROOTS "
+                                                    "to the directories that may be screened.")
     folder = Path(folder_path)
-    if not folder.exists() or not folder.is_dir():
-        raise HTTPException(status_code=400, detail=f"Folder not found: {folder_path}")
-
-    overall_start = time.time()
-
-    # Get all resume files from the folder recursively
-    resume_files = [
-        f for f in folder.rglob("*")
-        if f.is_file() and f.suffix.lower() in {".pdf", ".docx", ".txt"}
-    ]
-    resume_files.sort()
-    
-    total_files = len(resume_files)
-    if total_files == 0:
-        raise HTTPException(status_code=400, detail="No resume files found in folder")
-    
-    # Determine optimal batch size (max 300 files per batch for stability)
-    batch_size = 300
-    num_batches = (total_files + batch_size - 1) // batch_size
-    
-    print(f"[PARALLEL] Processing {total_files} files in {num_batches} batches of {batch_size}...")
-    
-    # Build job profile once (shared across all batches)
-    job = build_job_profile(
-        title=title,
-        description=description,
-        required_skills=_split_csv(required_skills),
-        preferred_skills=_split_csv(preferred_skills),
-        min_experience_years=float(min_experience_years),
-        required_education=required_education,
-    )
-
-    # Create a temporary directory to hold batch subdirectories
-    with tempfile.TemporaryDirectory(prefix="ats_parallel_batches_") as batch_root:
-        batch_root_path = Path(batch_root)
-        batch_folders = []
-        
-        # Create batch subdirectories and copy files
-        for batch_id in range(num_batches):
-            start_idx = batch_id * batch_size
-            end_idx = min(start_idx + batch_size, total_files)
-            batch_files = resume_files[start_idx:end_idx]
-            
-            # Create batch folder
-            batch_folder = batch_root_path / f"batch_{batch_id}"
-            batch_folder.mkdir()
-            
-            # Copy batch files
-            for file_path in batch_files:
-                shutil.copy2(file_path, batch_folder / file_path.name)
-            
-            batch_folders.append((batch_folder, batch_id, len(batch_files)))
-
-        # Create batch processing tasks
-        batch_tasks = [
-            _process_batch_folder(str(batch_folder), job, top_n, batch_id)
-            for batch_folder, batch_id, _ in batch_folders
-        ]
-
-        # Process all batches in parallel
-        print(f"[PARALLEL] Starting {num_batches} parallel batch tasks...")
-        batch_results = await asyncio.gather(*batch_tasks)
-        print(f"[PARALLEL] All batches completed")
-
-        # Aggregate results
-        all_candidates = []
-        total_submitted = 0
-        total_processed = 0
-        total_filtered = 0
-        total_failed = 0
-        batch_timings = []
-
-        for batch_id, (output, duration) in enumerate(batch_results):
-            batch_size_actual = batch_folders[batch_id][2]
-            batch_timings.append({
-                "batch_id": batch_id,
-                "files_in_batch": batch_size_actual,
-                "duration_seconds": round(duration, 2),
-                "throughput": round(batch_size_actual / duration, 2) if duration > 0 else 0,
-            })
-            
-            total_submitted += output.total_submitted
-            total_processed += output.total_processed
-            total_filtered += output.total_filtered
-            total_failed += output.total_failed
-            
-            # Collect top candidates from each batch
-            all_candidates.extend(output.top_candidates)
-
-        # Sort all candidates by score and take top N
-        # Convert to dicts if needed
-        candidates_as_dicts = []
-        for cand in all_candidates:
-            if isinstance(cand, dict):
-                cand_dict = cand
-            else:
-                # Convert dataclass/object to dict
-                cand_dict = asdict(cand) if is_dataclass(cand) else vars(cand)
-            
-            # Ensure score field is present for sorting
-            if "score" not in cand_dict and "scores" in cand_dict:
-                scores_obj = cand_dict["scores"]
-                if isinstance(scores_obj, dict):
-                    cand_dict["score"] = scores_obj.get("final", 0)
-                else:
-                    cand_dict["score"] = scores_obj.final if hasattr(scores_obj, "final") else 0
-            
-            candidates_as_dicts.append(cand_dict)
-        
-        candidates_as_dicts.sort(key=lambda x: x.get("score", 0), reverse=True)
-        top_candidates = candidates_as_dicts[:int(top_n)]
-
-        overall_duration = time.time() - overall_start
-        throughput = total_processed / overall_duration if overall_duration > 0 else 0
-
-        response_data = {
-            "total_submitted": total_submitted,
-            "total_processed": total_processed,
-            "total_filtered": total_filtered,
-            "total_failed": total_failed,
-            "top_candidates": _to_jsonable(top_candidates),
-            "execution_summary": {
-                "duration_seconds": round(overall_duration, 2),
-                "total_submitted": total_submitted,
-                "total_processed": total_processed,
-                "total_filtered": total_filtered,
-                "throughput_resumes_per_second": round(throughput, 2),
-                "folder_input": {
-                    "source_path": str(folder_path),
-                    "total_files_found": total_files,
-                },
-                "batch_processing": {
-                    "num_batches": num_batches,
-                    "batch_size": batch_size,
-                    "batch_details": batch_timings,
-                    "parallelization": f"{num_batches} batches processed concurrently",
-                },
-            },
-        }
-        
-        return response_data
+    if not _folder_allowed(folder):
+        raise HTTPException(status_code=403, detail="Folder is not inside an allowed root (ATS_ALLOWED_FOLDER_ROOTS).")
+    if not folder.is_dir():
+        raise HTTPException(status_code=400, detail="Folder not found")
+    job = _job_from_form(title, description, required_skills, preferred_skills, min_experience_years,
+                         required_education)
+    top = _validate_top_n(top_n)
+    files = list_resume_files(str(folder))
+    if not files:
+        raise HTTPException(status_code=400, detail="No files found in folder")
+    async with _semaphore():
+        output = await screen_files(files, job, top_n=top, progress_key=request_id.strip()[:64] or None)
+    return _bulk_response(output)
