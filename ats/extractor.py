@@ -1,9 +1,4 @@
-"""Deterministic extraction of experience, education, candidate name and skills from resume text.
-
-Input text is the parser's normalized form: lowercase ASCII, one source line per line.
-"""
 from __future__ import annotations
-
 import re
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -14,7 +9,6 @@ from . import config
 from .schema import ExtractionResult
 from .skills import scan_taxonomy
 
-# ----------------------------------------------------------------------------- education levels
 
 EDUCATION_LEVELS: Dict[str, int] = {
     "phd": 5,
@@ -24,7 +18,6 @@ EDUCATION_LEVELS: Dict[str, int] = {
     "diploma": 2,
     "school": 1,
     "unknown": 0,
-    # accepted spellings for a *required* education level
     "any": 0,
     "none": 0,
     "doctorate": 5,
@@ -472,8 +465,9 @@ def extract_education(text: str) -> str:
 # ----------------------------------------------------------------------------- candidate name
 
 _NAME_STOP = re.compile(
-    r"\b(?:resume|curriculum|vitae|cv|bio-?data|profile|summary|objective|contact|address|email|e-mail|mobile|"
+    r"\b(?:resume|curriculum|curriculam|vitae|cv|bio-?data|profile|summary|objective|contact|address|email|e-mail|mobile|"
     r"phone|linkedin|github|career|education|experience|skills|declaration|personal|details|page|india|"
+    r"covering|letter|tally|erp|sap|vlsi|rtl|eng|mgmt|management|"
     r"engineer|developer|manager|analyst|consultant|executive|officer|specialist|designer|intern|accountant|"
     r"technician|supervisor|architect|administrator|assistant|trainee|fresher|professional|associate|lead|"
     r"director|head|scientist|tester|operator|coordinator|representative|ltd|pvt|limited|inc|llc|"
@@ -483,7 +477,7 @@ _NAME_STOP = re.compile(
     r"educational|qualifications?|academic|technical|work|professional|achievements?|certifications?|"
     r"references?|hobbies|languages|projects?|training|internships?|strengths?|"
     r"nagar|street|road|colony|layout|district|dist|village|taluk|near|opp|flat|apartments?|sector|"
-    r"phase|cross|main|block|floor|house|plot|pin|city|state)\b",
+    r"phase|cross|main|block|floor|house|plot|pin|city|state|palayam|patti|puram)\b",
     re.IGNORECASE,
 )
 _COMMON_SINGLE_WORDS = {"experienced", "dedicated", "motivated", "objective", "summary", "overview", "welcome",
@@ -549,6 +543,10 @@ def _valid_name(candidate: str, require_capitals: bool = False) -> Optional[str]
 
 def name_from_filename(file_name: str) -> str:
     stem = re.sub(r"\.[A-Za-z0-9]{2,5}$", "", file_name)
+    # Job titles often follow the experience bracket or '-fresher-' in filenames ("Name-[6yr]-RTL design Eng")
+    before_tag = re.split(r"\[|(?:[-_]\s*fresher\b)|(?:_dv_trained\b)", stem, maxsplit=1, flags=re.IGNORECASE)[0]
+    if before_tag.strip(" _-."):
+        stem = before_tag
     stem = re.sub(r"[\[\(\{][^\]\)\}]*[\]\)\}]", " ", stem)  # "[14yrs]", "(1)"
     stem = re.sub(r"([a-z])([A-Z])", r"\1 \2", stem)  # camelCase
     stem = re.sub(r"[_\-.+,]+", " ", stem)

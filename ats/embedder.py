@@ -75,7 +75,7 @@ class Embedder:
     def __init__(self, batch_size: int = 32) -> None:
         self.batch_size = max(1, int(batch_size))
         self.cache_dir = config.CACHE_DIR / "embeddings"
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        if config.CACHE_DIR.exists(): self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     @classmethod
     def get_model(cls):

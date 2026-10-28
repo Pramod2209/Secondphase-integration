@@ -80,7 +80,7 @@ MAX_CONCURRENT_JOBS = max(1, _env_int("ATS_MAX_CONCURRENT_JOBS", 1))
 ALLOWED_FOLDER_ROOTS = [p for p in os.environ.get("ATS_ALLOWED_FOLDER_ROOTS", "").split(os.pathsep) if p.strip()]
 
 # Saved result files never contain resume text or embeddings.
-SAVE_RESULTS_JSON = _env_bool("ATS_SAVE_RESULTS", True)
+SAVE_RESULTS_JSON = _env_bool("ATS_SAVE_RESULTS", False)
 
 WEIGHT_SKILLS = 0.40
 WEIGHT_EXPERIENCE = 0.30
@@ -104,5 +104,4 @@ PARSER_VERSION = "p5"
 EXTRACTOR_VERSION = "e5"
 EMBEDDING_VERSION = "m2"
 
-for path in (CACHE_DIR, LOG_DIR, OUTPUT_DIR, RUNS_DIR):
-    path.mkdir(parents=True, exist_ok=True)
+

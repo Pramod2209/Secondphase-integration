@@ -290,14 +290,76 @@ def tesseract_cmd() -> Optional[str]:
 
 
 def ocr_available() -> bool:
-    if not config.OCR_ENABLED or not tesseract_cmd():
+    if not config.OCR_ENABLED:
         return False
+    if tesseract_cmd():
+        try:
+            import pytesseract  # noqa: F401
+            from PIL import Image  # noqa: F401
+
+            return True
+        except ImportError:
+            pass
     try:
-        import pytesseract  # noqa: F401
+        import numpy  # noqa: F401
+        import rapidocr_onnxruntime  # noqa: F401
         from PIL import Image  # noqa: F401
+
+        return True
     except ImportError:
         return False
-    return True
+
+
+@lru_cache(maxsize=1)
+def _get_rapidocr():
+    try:
+        import os
+        os.environ.setdefault("OMP_NUM_THREADS", "1")
+        os.environ.setdefault("MKL_NUM_THREADS", "1")
+        from rapidocr_onnxruntime import RapidOCR
+
+        return RapidOCR(intra_op_num_threads=1, inter_op_num_threads=1)
+    except TypeError:
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+
+            return RapidOCR()
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
+def _ocr_pil_image(img) -> str:
+    """Run OCR on a PIL image using Tesseract if installed, falling back to RapidOCR."""
+    tess = tesseract_cmd()
+    if tess:
+        import pytesseract
+
+        pytesseract.pytesseract.tesseract_cmd = tess
+        if img.width < 1200:  # upscale small scans; Tesseract wants ~300dpi text
+            scale = 1200 / img.width
+            img = img.resize((int(img.width * scale), int(img.height * scale)))
+        return pytesseract.image_to_string(img, config="--psm 3", timeout=60)
+    engine = _get_rapidocr()
+    if engine is None:
+        return ""
+    import numpy as np
+
+    rgb = img.convert("RGB")
+    max_dim = max(rgb.width, rgb.height)
+    if max_dim > 1200:
+        scale = 1200 / max_dim
+        rgb = rgb.resize((max(1, int(rgb.width * scale)), max(1, int(rgb.height * scale))))
+    arr = np.asarray(rgb)
+    try:
+        res, _ = engine(arr)
+    except Exception as exc:
+        logger.debug("RapidOCR error on %sx%s image: %s", rgb.width, rgb.height, exc)
+        return ""
+    if not res:
+        return ""
+    return "\n".join(str(item[1]) for item in res if len(item) >= 2 and item[1])
 
 
 def _pdf_page_images(file_path: str, max_pages: int):
@@ -354,24 +416,42 @@ def _decode_pdf_image(stream, width, height, Image):
 
 
 def ocr_pdf(file_path: str) -> str:
-    import pytesseract
-
-    pytesseract.pytesseract.tesseract_cmd = tesseract_cmd()
     texts = []
     for img in _pdf_page_images(file_path, config.OCR_MAX_PAGES):
-        if img.width < 1200:  # upscale small scans; Tesseract wants ~300dpi text
-            scale = 1200 / img.width
-            img = img.resize((int(img.width * scale), int(img.height * scale)))
-        texts.append(pytesseract.image_to_string(img, config="--psm 3", timeout=60))
+        t = _ocr_pil_image(img)
+        if t.strip():
+            texts.append(t)
+    joined = "\n".join(texts)
+    if len(re.sub(r"\W", "", joined)) >= 20:
+        return joined
+    # Fallback: rasterize pages via PyMuPDF (handles scanned PDFs with non-standard XObjects
+    # and real resumes exported as vector outlines).
+    try:
+        import fitz
+        from PIL import Image
+
+        doc = fitz.open(file_path)
+        try:
+            for page_idx in range(min(len(doc), config.OCR_MAX_PAGES)):
+                page = doc[page_idx]
+                if not page.get_images() and _vector_glyph_pdf(file_path):
+                    break
+                pix = page.get_pixmap(dpi=150, alpha=False)
+                img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                t = _ocr_pil_image(img)
+                if t.strip():
+                    texts.append(t)
+        finally:
+            doc.close()
+    except Exception as exc:
+        logger.debug("PyMuPDF OCR fallback failed for %s: %s", Path(file_path).name, exc)
     return "\n".join(texts)
 
 
 def ocr_docx_images(file_path: str) -> str:
     """OCR the largest images embedded in a .docx (resumes saved as pictures inside Word)."""
-    import pytesseract
     from PIL import Image
 
-    pytesseract.pytesseract.tesseract_cmd = tesseract_cmd()
     texts = []
     with zipfile.ZipFile(file_path) as zf:
         media = [i for i in zf.infolist() if i.filename.startswith("word/media/")
@@ -383,10 +463,9 @@ def ocr_docx_images(file_path: str) -> str:
                 continue
             if img.width * img.height < 300 * 300:  # logos / icons
                 continue
-            if img.width < 1200:
-                scale = 1200 / img.width
-                img = img.resize((int(img.width * scale), int(img.height * scale)))
-            texts.append(pytesseract.image_to_string(img, config="--psm 3", timeout=60))
+            t = _ocr_pil_image(img)
+            if t.strip():
+                texts.append(t)
     return "\n".join(texts)
 
 
@@ -417,6 +496,19 @@ def parse_document(file_path: str) -> ParseResult:
             ocr_text, ocr_display = normalize_text(ocr_docx_images(file_path))  # scanned pages pasted into Word
             if len(ocr_text) > len(text):
                 text, display, ocr_used = ocr_text, ocr_display, True
+        if suffix == ".pdf" and len(re.sub(r"\W", "", text)) < config.OCR_MIN_TEXT_CHARS:
+            try:
+                import fitz
+                doc = fitz.open(file_path)
+                try:
+                    fitz_pages = [doc[i].get_text("text") for i in range(min(len(doc), config.MAX_PDF_PAGES))]
+                finally:
+                    doc.close()
+                fitz_text, fitz_display = normalize_text("\n".join(fitz_pages))
+                if len(re.sub(r"\W", "", fitz_text)) > len(re.sub(r"\W", "", text)):
+                    text, display = fitz_text, fitz_display
+            except Exception:
+                pass
         if suffix == ".pdf" and len(re.sub(r"\W", "", text)) < config.OCR_MIN_TEXT_CHARS:
             if ocr_available():
                 ocr_text, ocr_display = normalize_text(ocr_pdf(file_path))

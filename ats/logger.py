@@ -23,13 +23,13 @@ def get_logger(name: str) -> logging.Logger:
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
 
-    log_file = config.LOG_DIR / f"ats_{datetime.now().strftime('%Y%m%d')}.log"
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
-
     logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
+    if config.LOG_DIR.exists():
+        log_file = config.LOG_DIR / f"ats_{datetime.now().strftime('%Y%m%d')}.log"
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+        logger.addHandler(file_handler)
     logger.propagate = False
     return logger
 

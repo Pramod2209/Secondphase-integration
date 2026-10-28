@@ -19,6 +19,7 @@ import json
 import os
 import re
 import tempfile
+import zipfile
 from contextlib import asynccontextmanager
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -26,7 +27,7 @@ from typing import Any, List, Optional, Tuple
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 import logging
 
 from . import config
@@ -141,9 +142,12 @@ def _validate_top_n(top_n: str) -> int:
     return value
 
 
-async def _save_upload(upload: UploadFile, target: Path) -> Tuple[bool, int]:
-    """Stream an upload to disk. Returns (within_size_limit, bytes_written)."""
-    limit = config.MAX_FILE_SIZE_MB * 1024 * 1024
+async def _save_upload(upload: UploadFile, target: Path,
+                       size_limit_bytes: Optional[int] = None) -> Tuple[bool, int]:
+    """Stream an upload to disk. Returns (within_size_limit, bytes_written).
+    size_limit_bytes defaults to MAX_FILE_SIZE_MB; pass a larger value for ZIPs."""
+    if size_limit_bytes is None:
+        size_limit_bytes = config.MAX_FILE_SIZE_MB * 1024 * 1024
     written = 0
     with open(target, "wb") as fh:
         while True:
@@ -151,17 +155,100 @@ async def _save_upload(upload: UploadFile, target: Path) -> Tuple[bool, int]:
             if not chunk:
                 break
             written += len(chunk)
-            if written > limit:
+            if written > size_limit_bytes:
                 break
             fh.write(chunk)
-    if written > limit:
+    if written > size_limit_bytes:
         target.unlink(missing_ok=True)
         return False, written
     return True, written
 
 
+_RESUME_SUFFIXES = {".pdf", ".docx", ".doc", ".txt"}
+_IGNORED_ZIP_NAMES = {"thumbs.db", "desktop.ini", ".ds_store"}
+
+
+# Max size for a ZIP upload and for a single resume file extracted from a ZIP.
+_ZIP_SIZE_LIMIT = 500 * 1024 * 1024  # 500 MB
+_ZIP_MEMBER_SIZE_LIMIT = _ZIP_SIZE_LIMIT
+
+
+def _extract_zip(zip_path: Path, extract_dir: Path, zip_display: str) -> Tuple[List[Tuple[str, str]], list]:
+    """Extract a ZIP and return (resume_files, rejected).
+
+    - Non-resume entries are silently skipped.
+    - Members are streamed out in 1 MB chunks so RAM usage is flat regardless of file size.
+    - The per-member limit is _ZIP_MEMBER_SIZE_LIMIT (defaults to MAX_REQUEST_SIZE_MB, i.e. 2 GB).
+    """
+    from .orchestrator import _build_result
+    from .worker import FileAnalysis
+
+    files: List[Tuple[str, str]] = []
+    rejected = []
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            members = [m for m in zf.infolist() if not m.is_dir()]
+            for idx, member in enumerate(members):
+                raw_name = Path(member.filename).name
+                if (not raw_name
+                        or raw_name.lower() in _IGNORED_ZIP_NAMES
+                        or raw_name.startswith(".")
+                        or raw_name.startswith("~$")):
+                    continue
+                suffix = Path(raw_name).suffix.lower()
+                if suffix not in _RESUME_SUFFIXES:
+                    continue  # skip non-resume files silently
+
+                display = f"{zip_display}/{raw_name}"
+                safe_name = re.sub(r"[^\w.\-]", "_", raw_name)
+                dest = extract_dir / safe_name
+                # Avoid collisions within the same ZIP
+                counter = 1
+                while dest.exists():
+                    dest = extract_dir / f"{Path(safe_name).stem}_{counter}{suffix}"
+                    counter += 1
+
+                # Stream-extract in chunks to avoid loading the whole file into RAM
+                written = 0
+                oversized = False
+                try:
+                    with zf.open(member) as src, open(dest, "wb") as dst:
+                        while True:
+                            buf = src.read(_CHUNK)
+                            if not buf:
+                                break
+                            written += len(buf)
+                            if written > _ZIP_MEMBER_SIZE_LIMIT:
+                                oversized = True
+                                break
+                            dst.write(buf)
+                except Exception as exc:
+                    dest.unlink(missing_ok=True)
+                    analysis = FileAnalysis(index=idx, display_path=display, file_name=raw_name, ok=False,
+                                           error=f"extract_error: {exc}")
+                    rejected.append(_build_result(analysis, "failed", None, None, None, False, 0.0))  # type: ignore[arg-type]
+                    continue
+
+                if oversized:
+                    dest.unlink(missing_ok=True)
+                    limit_mb = _ZIP_MEMBER_SIZE_LIMIT // (1024 * 1024)
+                    analysis = FileAnalysis(index=idx, display_path=display, file_name=raw_name, ok=False,
+                                           error=f"file_too_large: exceeds {limit_mb} MB limit")
+                    rejected.append(_build_result(analysis, "failed", None, None, None, False, 0.0))  # type: ignore[arg-type]
+                    continue
+
+                files.append((str(dest), display))
+
+    except zipfile.BadZipFile:
+        analysis = FileAnalysis(index=0, display_path=zip_display, file_name=zip_display, ok=False,
+                               error="bad_zip: not a valid ZIP archive")
+        rejected.append(_build_result(analysis, "failed", None, None, None, False, 0.0))  # type: ignore[arg-type]
+    return files, rejected
+
+
 async def _store_uploads(uploads: List[UploadFile], temp_dir: Path):
-    """Save uploads under generated names (never the client's path). Returns (files, rejected)."""
+    """Save uploads under generated names (never the client's path). Returns (files, rejected).
+    ZIP files are transparently extracted; resume files inside are queued for screening."""
     from .orchestrator import _build_result
     from .worker import FileAnalysis
 
@@ -174,14 +261,28 @@ async def _store_uploads(uploads: List[UploadFile], temp_dir: Path):
         if seen[display.lower()] > 1:  # same name uploaded twice: keep both, label the copies
             display = f"{display} [{seen[display.lower()]}]"
         suffix = Path(safe_display_name(upload.filename)).suffix.lower()[:10]
-        target = temp_dir / f"{index:05d}{suffix if re.fullmatch(r'\.[a-z0-9]+', suffix or '') else ''}"
-        ok, size = await _save_upload(upload, target)
-        if ok:
-            files.append((str(target), display))
-        else:
+        ext = suffix if re.fullmatch(r'\.[a-z0-9]+', suffix or '') else ''
+        target = temp_dir / f"{index:05d}{ext}"
+        ok, size = await _save_upload(
+            upload, target,
+            # ZIPs get their own generous limit (500 MB) so large archives aren't rejected before extraction
+            size_limit_bytes=_ZIP_SIZE_LIMIT if ext == ".zip" else None,
+        )
+        if not ok:
             analysis = FileAnalysis(index=index, display_path=display, file_name=display, ok=False,
                                     error=f"file_too_large: exceeds {config.MAX_FILE_SIZE_MB} MB limit")
             rejected.append(_build_result(analysis, "failed", None, None, None, False, 0.0))  # type: ignore[arg-type]
+            continue
+        if ext == ".zip":
+            # Extract ZIP contents into a subfolder and collect resume files
+            zip_extract_dir = temp_dir / f"{index:05d}_zip"
+            zip_extract_dir.mkdir(exist_ok=True)
+            zfiles, zrejected = _extract_zip(target, zip_extract_dir, display)
+            files.extend(zfiles)
+            rejected.extend(zrejected)
+            target.unlink(missing_ok=True)  # remove the raw ZIP; no longer needed
+        else:
+            files.append((str(target), display))
     return files, rejected
 
 
@@ -217,6 +318,8 @@ async def health() -> dict[str, Any]:
 async def progress(request_id: str) -> dict[str, Any]:
     entry = get_progress(request_id)
     if entry is None:
+        if re.fullmatch(r"[a-z0-9]{6,14}-[a-z0-9]{4,14}", request_id):
+            return {"stage": "uploading", "analyzed": 0, "total": 0}
         raise HTTPException(status_code=404, detail="Unknown request id")
     return entry
 
@@ -241,7 +344,8 @@ async def single_screen(
     async with _semaphore():
         with tempfile.TemporaryDirectory(prefix="ats_single_api_") as temp_dir:
             suffix = Path(display).suffix.lower()
-            target = Path(temp_dir) / f"resume{suffix if re.fullmatch(r'\.[a-z0-9]+', suffix or '') else ''}"
+            ext = suffix if re.fullmatch(r'\.[a-z0-9]+', suffix or '') else ''
+            target = Path(temp_dir) / f"resume{ext}"
             ok, _ = await _save_upload(resume, target)
             if not ok:
                 raise HTTPException(status_code=413, detail=f"File exceeds {config.MAX_FILE_SIZE_MB} MB limit")
@@ -270,6 +374,9 @@ async def bulk_screen(
                          required_education, reference_date)
     top = _validate_top_n(top_n)
     key = request_id.strip()[:64] or None
+    if key:
+        from .orchestrator import _progress
+        _progress(key, total=len(resumes), stage="uploading")
     async with _semaphore():
         with tempfile.TemporaryDirectory(prefix="ats_bulk_api_") as temp_dir:
             files, rejected = await _store_uploads(resumes, Path(temp_dir))
@@ -322,3 +429,212 @@ async def bulk_screen_folder(
     async with _semaphore():
         output = await screen_files(files, job, top_n=top, progress_key=request_id.strip()[:64] or None)
     return _bulk_response(output)
+
+
+# ----------------------------------------------------------------------------- Resume Extractor Endpoints
+
+
+async def _extract_upload_batch(files: List[UploadFile], temp_dir: Path) -> List[Any]:
+    """Save uploads preserving original filenames and extract ZIPs cleanly. Returns list of (file_path, display_name)."""
+    candidate_files: List[Any] = []
+    for idx, upload in enumerate(files):
+        raw_name = safe_display_name(upload.filename)
+        suffix = Path(raw_name).suffix.lower()
+        dest = temp_dir / f"upload_{idx:05d}{suffix}"
+
+        ok, _ = await _save_upload(upload, dest, size_limit_bytes=_ZIP_SIZE_LIMIT)
+        if not ok:
+            continue
+
+        if suffix == ".zip":
+            unzip_folder = temp_dir / f"unpacked_{idx:05d}"
+            unzip_folder.mkdir(parents=True, exist_ok=True)
+            try:
+                with zipfile.ZipFile(dest, "r") as zf:
+                    members = [m for m in zf.infolist() if not m.is_dir()]
+                    for m_idx, member in enumerate(members):
+                        member_name = Path(member.filename).name
+                        if (not member_name
+                                or member_name.lower() in _IGNORED_ZIP_NAMES
+                                or member_name.startswith(".")
+                                or member_name.startswith("~$")):
+                            continue
+                        m_ext = Path(member_name).suffix.lower()
+                        if m_ext not in _RESUME_SUFFIXES:
+                            continue
+                        safe_stem = re.sub(r"[^\w.\-]", "_", Path(member_name).stem)[:80] or f"doc_{m_idx}"
+                        member_dest = unzip_folder / f"{m_idx:05d}_{safe_stem}{m_ext}"
+                        try:
+                            with zf.open(member) as src, open(member_dest, "wb") as dst:
+                                while True:
+                                    buf = src.read(_CHUNK)
+                                    if not buf:
+                                        break
+                                    dst.write(buf)
+                            candidate_files.append((str(member_dest), member_name))
+                        except Exception as m_exc:
+                            logger.warning("Could not extract member %s from %s: %s", member_name, raw_name, m_exc)
+            except Exception as exc:
+                logger.warning("Could not unzip %s: %s", raw_name, exc)
+            finally:
+                dest.unlink(missing_ok=True)
+        elif suffix in _RESUME_SUFFIXES:
+            candidate_files.append((str(dest), raw_name))
+
+    return candidate_files
+
+
+@app.post("/api/extract")
+async def extract_candidates(
+    files: List[UploadFile] = File(...),
+    request_id: str = Form(""),
+) -> Any:
+    """Extract structured candidate profile details from resumes and/or ZIP archives."""
+    from time import perf_counter
+    from .data_extractor import process_all as extract_process_all, FINAL_HEADERS
+    from .orchestrator import _progress
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided for extraction")
+    if len(files) > config.MAX_FILES_PER_REQUEST:
+        raise HTTPException(status_code=413, detail=f"Too many files (max {config.MAX_FILES_PER_REQUEST} per request)")
+
+    t0 = perf_counter()
+    if request_id:
+        _progress(request_id, total=len(files), analyzed=0, stage="uploading")
+
+    async with _semaphore():
+        with tempfile.TemporaryDirectory(prefix="ats_extract_api_") as temp_dir:
+            candidate_files = await _extract_upload_batch(files, Path(temp_dir))
+            total_cand = len(candidate_files)
+            logger.info("Extractor API start: files=%s request_id=%s", total_cand, request_id or "-")
+            if request_id:
+                _progress(request_id, total=total_cand, analyzed=0, stage="extracting")
+
+            def on_prog(done, total):
+                if request_id:
+                    _progress(request_id, total=total, analyzed=done, stage="extracting")
+
+            loop = asyncio.get_running_loop()
+            records = await loop.run_in_executor(None, extract_process_all, candidate_files, on_prog)
+
+    elapsed = round(perf_counter() - t0, 2)
+    logger.info("Extractor API complete: extracted=%s time=%ss", len(records), elapsed)
+    if request_id:
+        _progress(request_id, total=len(records), analyzed=len(records), stage="completed")
+
+    return {
+        "status": "ok",
+        "total_extracted": len(records),
+        "headers": FINAL_HEADERS,
+        "records": records,
+    }
+
+
+@app.post("/api/extract-folder")
+async def extract_folder_candidates(
+    folder_path: str = Form(...),
+    request_id: str = Form(""),
+) -> Any:
+    """Extract candidate records directly from a local folder on this machine."""
+    from time import perf_counter
+    from .data_extractor import extract_from_folder, FINAL_HEADERS
+    from .orchestrator import _progress
+
+    folder = Path(folder_path.strip().strip('"').strip("'"))
+    if not folder.exists() or not folder.is_dir():
+        raise HTTPException(status_code=400, detail=f"Folder not found: {folder_path}")
+
+    t0 = perf_counter()
+    if request_id:
+        _progress(request_id, total=0, analyzed=0, stage="scanning_folder")
+
+    def on_prog(done, total):
+        if request_id:
+            _progress(request_id, total=total, analyzed=done, stage="extracting")
+
+    logger.info("Extractor folder start: folder=%s request_id=%s", folder, request_id or "-")
+    loop = asyncio.get_running_loop()
+    records = await loop.run_in_executor(None, extract_from_folder, str(folder), on_prog)
+
+    elapsed = round(perf_counter() - t0, 2)
+    logger.info("Extractor folder complete: extracted=%s time=%ss", len(records), elapsed)
+    if request_id:
+        _progress(request_id, total=len(records), analyzed=len(records), stage="completed")
+
+    return {
+        "status": "ok",
+        "total_extracted": len(records),
+        "headers": FINAL_HEADERS,
+        "records": records,
+    }
+
+
+@app.post("/api/extract/excel")
+async def extract_and_download_excel(
+    files: List[UploadFile] = File(...),
+    request_id: str = Form(""),
+) -> Any:
+    """Extract resumes and return a professionally formatted .xlsx file directly."""
+    from time import perf_counter
+    from .data_extractor import process_all as extract_process_all, build_excel_bytes
+    from .orchestrator import _progress
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    t0 = perf_counter()
+    if request_id:
+        _progress(request_id, total=len(files), analyzed=0, stage="uploading")
+
+    async with _semaphore():
+        with tempfile.TemporaryDirectory(prefix="ats_extract_excel_") as temp_dir:
+            candidate_files = await _extract_upload_batch(files, Path(temp_dir))
+            total_cand = len(candidate_files)
+            logger.info("Extractor Excel start: files=%s request_id=%s", total_cand, request_id or "-")
+            if request_id:
+                _progress(request_id, total=total_cand, analyzed=0, stage="extracting")
+
+            def on_prog(done, total):
+                if request_id:
+                    _progress(request_id, total=total, analyzed=done, stage="extracting")
+
+            loop = asyncio.get_running_loop()
+            records = await loop.run_in_executor(None, extract_process_all, candidate_files, on_prog)
+
+            if request_id:
+                _progress(request_id, total=len(records), analyzed=len(records), stage="formatting_excel")
+
+            excel_bytes = await loop.run_in_executor(None, build_excel_bytes, records)
+
+    elapsed = round(perf_counter() - t0, 2)
+    logger.info("Extractor Excel complete: extracted=%s time=%ss", len(records), elapsed)
+    if request_id:
+        _progress(request_id, total=len(records), analyzed=len(records), stage="completed")
+
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="extracted_resumes.xlsx"'},
+    )
+
+
+@app.post("/api/extract/download-excel")
+async def download_excel_from_records(
+    request: Request,
+) -> Any:
+    """Accept extracted candidate records as JSON and return styled .xlsx bytes."""
+    from .data_extractor import build_excel_bytes
+
+    try:
+        body = await request.json()
+        records = body.get("records", []) if isinstance(body, dict) else (body if isinstance(body, list) else [])
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}")
+
+    excel_bytes = await asyncio.get_running_loop().run_in_executor(None, build_excel_bytes, records)
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="extracted_resumes.xlsx"'},
+    )

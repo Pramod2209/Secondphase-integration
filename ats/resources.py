@@ -6,9 +6,9 @@ import psutil
 
 from .schema import SystemResources
 
-# Approximate resident memory of one parser worker process (pdfminer + python-docx, no torch).
-_PARSE_WORKER_MB = 120
-_RESERVED_MB = 900  # main process incl. MiniLM model + headroom
+# Approximate resident memory of one parser worker process (pdfminer + python-docx + RapidOCR).
+_PARSE_WORKER_MB = 220
+_RESERVED_MB = 1100  # main process incl. MiniLM model + headroom
 
 
 def _env_int(*names: str) -> int | None:
@@ -29,7 +29,7 @@ def detect_and_tune() -> SystemResources:
     available_ram_gb = psutil.virtual_memory().available / (1024 ** 3)
 
     by_ram = int((available_ram_gb * 1024 - _RESERVED_MB) // _PARSE_WORKER_MB)
-    default_workers = max(1, min(cpu_cores - 1, 16, by_ram))
+    default_workers = max(1, min(cpu_cores - 1, 8, by_ram))
     parse_workers = _env_int("ATS_PARSE_WORKERS", "ATS_PROCESS_WORKERS") or default_workers
 
     embedding_batch_size = _env_int("ATS_EMBEDDING_BATCH_SIZE") or 32
